@@ -8,7 +8,8 @@
 # Użycie (jako root na aktywnym head node):
 #   ./bcm-containerd-fix.sh [--node N]... [--fix] [--resume] [--conf PLIK] [--yes]
 #
-#   --node N    węzeł do sprawdzenia (można powtarzać); domyślnie ten head node
+#   --node N    węzeł do sprawdzenia (można powtarzać); domyślnie ten head node + wszystkie węzły,
+#               dla których cmd ma usługę containerd (rola generic::containerd z kreatora)
 #   --fix       napraw wykrytą przyczynę (każdy krok z potwierdzeniem), potem diagnoza od nowa
 #   --resume    gdy containerd działa: wznów instalację K8s z zapisanego configu kreatora
 #               (najpierw --remove częściowo utworzonego klastra, potem cm-kubernetes-setup -c)
@@ -26,6 +27,9 @@
 #   ROLE_MISSING     cmd nie ma usługi containerd dla węzła (kreator nie przypisał roli) -> --resume
 #   SERVICE_DOWN     usługa masked/failed/inactive albo socket nie odpowiada -> --fix: unmask/reset-failed/restart
 #   CRI_BROKEN       containerd działa, plugin CRI nie              -> --fix: restart; dalej: journal
+#   CMD_NOT_UP       systemd: containerd działa, ale cmd pokazuje usługę jako nie-UP (na to czeka kreator:
+#                    "all containerd services are active")       -> --fix: restart przez cmd
+#   NODE_DOWN        węzeł z rolą containerd nie jest UP w BCM    -> włącz/napraw węzeł
 #   SOCKET_MISMATCH  kreator czeka na inny socket niż ten, na którym słucha containerd
 #   OK               containerd i CRI działają (był timeout)        -> --resume
 #
@@ -67,8 +71,20 @@ export WORKDIR LOG_FILE REPORT
 info "Log: $LOG_FILE"
 
 HEAD=$(hostname -s)
-NODES=$(echo "${NODES:-$HEAD}" | xargs -n1 | awk '!s[$0]++' | xargs)
 is_local() { [ "$1" = "$HEAD" ] || [ "$1" = "$(hostname)" ]; }
+# Kreator czeka na containerd na WSZYSTKICH węzłach z rolą generic::containerd - bez --node
+# bierzemy ten head node i każdy węzeł, dla którego cmd ma usługę containerd.
+discover_devices; discover_status
+dev_status() { awk -F'\t' -v h="$1" '$1==h{print $2; exit}' "$WORKDIR/status.tsv"; }
+if [ -z "$NODES" ]; then
+  NODES=$HEAD
+  while IFS=$'\t' read -r _ h _; do
+    [ -n "$h" ] && [ "$h" != "$HEAD" ] || continue
+    cmsh_q "device; use $h; services; list" | awk '$1=="containerd"{f=1} END{exit !f}' && NODES="$NODES $h"
+  done <"$WORKDIR/devices.tsv"
+  info "Węzły z usługą containerd w BCM: $NODES"
+fi
+NODES=$(echo "$NODES" | xargs -n1 | awk '!s[$0]++' | xargs)
 
 # --------------------------------------------------------------- sonda -------
 # Wynik: linie klucz=wartość, potem sekcje @@CFGERR, @@STATUS, @@JOURNAL.
@@ -230,6 +246,16 @@ bcm_side() {
   if grep -qiE 'not found|unknown|error' <<<"$o" && ! grep -qw containerd <<<"$o"; then SVC_CMD[$n]=unknown
   elif awk '$1=="containerd"{f=1} END{exit !f}' <<<"$o"; then SVC_CMD[$n]=yes; else SVC_CMD[$n]=no; fi
   cmsh_q "device; use $n; services; status" >"$WORKDIR/raw/cmsh-services-status-$n.txt"
+  SVC_STAT[$n]=$(cmd_svc_status "$n" "$WORKDIR/raw/cmsh-services-status-$n.txt")
+}
+# Stan usługi containerd tak, jak widzi go cmd (na to czeka kreator): UP / FAILED / STOPPED / ...
+cmd_svc_status() {
+  local f=${2:-}
+  [ -n "$f" ] || { f=$WORKDIR/raw/cmsh-svc-now-$1.txt; cmsh_q "device; use $1; services; status" >"$f"; }
+  awk 'tolower($0) ~ /^[[:space:]]*containerd[ .:]/ {
+         if (match($0, /\[[^]]*\]/)) { s=substr($0, RSTART+1, RLENGTH-2); gsub(/^ +| +$/, "", s); print s }
+         else { $1=""; sub(/^ +/, ""); print }
+         exit }' "$f"
 }
 managed_files() {
   [ -n "${MANAGED+x}" ] && { echo "$MANAGED"; return; }
@@ -249,7 +275,7 @@ managed_files() {
 wizard_sock() { [ -r "$K8S_SETUP_LOG" ] && grep -i 'containerd' "$K8S_SETUP_LOG" | grep -oE '(unix://)?/[^ "'\'',)]+\.sock' | sed 's|^unix://||' | tail -1; }
 
 # ------------------------------------------------------------- werdykt -------
-declare -A VERDICT WHY SVC_CMD PROBE_CNT TRIED
+declare -A VERDICT WHY SVC_CMD SVC_STAT PROBE_CNT TRIED
 # CRI zgłoszony przez ctr i wszystkie jego pluginy "ok"
 cri_ok() { local c; c=$(pv "$1" cri | tr ' ' '\n' | grep .); [ -n "$c" ] && ! grep -qvE '^[^ ]+:ok$' <<<"$c"; }
 # Pliki wyłączające CRI, które containerd faktycznie czyta (config z ExecStart + jego imports)
@@ -299,6 +325,9 @@ verdict() {
   elif ! cri_ok "$n"; then VERDICT[$n]=CRI_BROKEN; WHY[$n]="pluginy CRI: ${cri:-brak w ctr plugins ls}"
   else VERDICT[$n]=OK; WHY[$n]="containerd $(pv "$n" srv_ver) słucha na $sock, CRI: $cri"
   fi
+  if [ "${VERDICT[$n]}" = OK ] && [ "${SVC_CMD[$n]}" = yes ] && [ "${SVC_STAT[$n]:-?}" != UP ]; then
+    VERDICT[$n]=CMD_NOT_UP; WHY[$n]="systemd: containerd działa, ale cmd pokazuje usługę jako '${SVC_STAT[$n]:-brak statusu}' - kreator czeka na UP w cmd"
+  fi
   if [ "${VERDICT[$n]}" = OK ] && is_local "$n"; then
     local ws; ws=$(wizard_sock)
     [ -n "$ws" ] && [ "$ws" != "$sock" ] && { VERDICT[$n]=SOCKET_MISMATCH; WHY[$n]="kreator (log) czeka na $ws, containerd słucha na $sock"; }
@@ -340,6 +369,11 @@ journal_hints() {
 diagnose() {
   local n=$1 W
   hdr "Diagnoza containerd: $n"
+  local ds; ds=$(dev_status "$n")
+  if ! is_local "$n" && [ -n "$ds" ] && [ "${ds%% *}" != UP ]; then
+    VERDICT[$n]=NODE_DOWN; WHY[$n]="węzeł w BCM ma status '$ds' - kreator czeka na containerd na każdym węźle klastra"
+    check FAIL "$n: NODE_DOWN" "${WHY[$n]}"; return
+  fi
   if ! probe "$n"; then VERDICT[$n]=UNREACHABLE; WHY[$n]="sonda nie zadziałała: $(tail -2 "$(probe_file "$n")" | tr '\n' ' ')"; check FAIL "$n: sonda" "${WHY[$n]}"; return; fi
   bcm_side "$n"; W=$(pv "$n" wrapper)
   info "$n: unit $(pv "$n" u_FragmentPath) (pakiet: $(pv "$n" unit_owner)), stan $(pv "$n" u_LoadState)/$(pv "$n" u_ActiveState)/$(pv "$n" u_SubState), restartów $(pv "$n" u_NRestarts)"
@@ -349,7 +383,7 @@ diagnose() {
   info "$n: kernel $(pv "$n" kernel), /lib/modules: $(pv "$n" kmod_dir), overlay.ko: $(pv "$n" ko_overlay), brak modułów:$(pv "$n" mods_missing)"
   info "$n: ctr version rc=$(pv "$n" ctr_rc) serwer=$(pv "$n" srv_ver); CRI: $(pv "$n" cri); snapshotter overlayfs: $(pv "$n" snap_overlay); crictl rc=$(pv "$n" crictl_rc)"
   info "$n: pakiety:$(pv "$n" pkgs); $(pv "$n" docker_state)"
-  info "$n: usługa containerd w cmd (services): ${SVC_CMD[$n]}; dysk:$(pv "$n" disk); RAM wolne $(pv "$n" mem_avail_mb) MB"
+  info "$n: usługa containerd w cmd: ${SVC_CMD[$n]}, stan w cmd: ${SVC_STAT[$n]:-?}; dysk:$(pv "$n" disk); RAM wolne $(pv "$n" mem_avail_mb) MB"
   verdict "$n"
   local w
   [ -n "$(pv "$n" pkgs | grep -oE '(^| )(containerd|containerd\.io|docker\.io|docker-ce|moby-engine)=')" ] \
@@ -363,6 +397,8 @@ diagnose() {
   w=$(pv "$n" crictl_rc); [ -n "$w" ] && [ "$w" != 0 ] && [ "${VERDICT[$n]}" = OK ] && warn "$n: crictl info rc=$w"
   case ${VERDICT[$n]} in
     OK) check PASS "$n: containerd" "${WHY[$n]}";;
+    CMD_NOT_UP) check FAIL "$n: ${VERDICT[$n]}" "${WHY[$n]}"
+        info "      szczegóły w cmd: cmsh -c \"device; use $n; services; use containerd; show\"; log cmd na $n: /var/log/cmdaemon (grep -i containerd)";;
     *)  check FAIL "$n: ${VERDICT[$n]}" "${WHY[$n]}"; journal_hints "$n";;
   esac
 }
@@ -388,10 +424,15 @@ wait_ctd() {
   local n=$1 i ctr sock; ctr=$(pv "$n" ctr); sock=$(pv "$n" sock)
   [ -n "$ctr" ] || ctr=$BCM_CTD/current/bin/ctr
   for i in $(seq 1 45); do
-    printf 'timeout 5 %q --address %q version >/dev/null 2>&1\n' "$ctr" "$sock" | nrun "$n" >/dev/null 2>&1 && { ok "$n: containerd odpowiada na $sock"; return 0; }
+    printf 'timeout 5 %q --address %q version >/dev/null 2>&1\n' "$ctr" "$sock" | nrun "$n" >/dev/null 2>&1 && break
     sleep 2
   done
-  warn "$n: containerd nie odpowiada na $sock po 90 s"; return 1
+  [ "$i" -lt 45 ] || { warn "$n: containerd nie odpowiada na $sock po 90 s"; return 1; }
+  ok "$n: containerd odpowiada na $sock"
+  [ "${SVC_CMD[$n]}" = yes ] || return 0
+  local st
+  for i in $(seq 1 30); do st=$(cmd_svc_status "$n"); [ "$st" = UP ] && { ok "$n: cmd: containerd UP"; return 0; }; sleep 2; done
+  warn "$n: cmd nadal pokazuje containerd jako '${st:-brak}' po 60 s"; return 1
 }
 
 image_hint() {
@@ -518,6 +559,8 @@ fix_SERVICE_DOWN() {
 }
 fix_CRI_BROKEN() { confirm "$1: zrestartować containerd (CRI nie wstał)?"; }
 
+fix_CMD_NOT_UP() { confirm "$1: zrestartować containerd przez cmd, żeby odświeżyć stan usługi (${SVC_STAT[$1]:-?})?"; }
+fix_NODE_DOWN() { warn "$1: włącz/napraw węzeł (cmsh -c \"device; status $1\", konsola/BMC) albo usuń go z klastra w kreatorze; potem diagnoza od nowa"; return 1; }
 fix_ROLE_MISSING()    { warn "$1: rolę generic::containerd przypisuje kreator - użyj --resume (usunięcie częściowego klastra + cm-kubernetes-setup -c)"; return 1; }
 fix_SOCKET_MISMATCH() { warn "$1: containerd działa, ale na innym sockecie niż oczekuje kreator - wyślij raport (raw/probe-$1.txt, raw/wizard-log.txt)"; return 1; }
 
@@ -539,7 +582,7 @@ for r in $(seq 1 "$ROUNDS"); do
   [ "$r" -gt 1 ] && hdr "Diagnoza po naprawie (runda $r)"
   for n in $NODES; do diagnose "$n"; done
   [ "$FIX" = 1 ] || break
-  todo=; for n in $NODES; do case ${VERDICT[$n]} in OK|UNREACHABLE) ;; *) todo="$todo $n";; esac; done
+  todo=; for n in $NODES; do case ${VERDICT[$n]} in OK|UNREACHABLE|NODE_DOWN) ;; *) todo="$todo $n";; esac; done
   [ -n "$todo" ] || break
   [ "$r" -eq "$ROUNDS" ] && break
   fixed=
