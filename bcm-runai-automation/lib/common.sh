@@ -389,6 +389,20 @@ Prometheus Operator Stack|kube-prometheus|prometheus-operator
 Prometheus Adapter|prometheus-adapter
 EOF
     ;;
+    # BCM 11 + Run:ai przez Helm (np. 2.26, której kreatory BCM nie oferują).
+    # Ingress (HAProxy) i pula MetalLB powstają w fazie runai, więc ich tu nie ma.
+    helm_bcm11) cat <<'EOF'
+NVIDIA GPU Operator|gpu-operator
+Knative Operator (Serving)|knative
+Kubeflow Training Operator|training-operator|kubeflow-training
+Kubernetes Metrics Server|metrics-server
+Kubernetes MPI Operator|mpi-operator
+Kube State Metrics|kube-state-metrics|kube-prometheus
+LeaderWorkerSet Operator|lws
+MetalLB|metallb
+Prometheus Operator Stack|kube-prometheus|prometheus-operator
+EOF
+    ;;
     *) cat <<'EOF'
 NVIDIA GPU Operator|gpu-operator
 Kubernetes Metrics Server|metrics-server
