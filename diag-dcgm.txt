@@ -1,0 +1,187 @@
+== cmsh /cm/local/apps/cmd/bin/cmsh
+	libcmdcgm.so => /cm/local/apps/cmd/lib/libcmdcgm.so (0x00007ffff551a000)
+	libdcgm.so.4 => not found
+ 0x0000000000000001 (NEEDED)             Shared library: [libcmdcgm.so]
+ 0x000000000000001d (RUNPATH)            Library runpath: [/cm/local/apps/boost/current/lib64:/cm/local/apps/openssl//lib64:/cm/local/apps/openldap/lib:/cm/local/apps/prometheus/current/lib64:/cm/local/apps/cuda-dcgm/current/lib64:/cm/local/apps/curl/lib:/cm/local/apps/gcc/current/lib64:/cm/local/apps/mysql++/current/lib:/cm/local/apps/cmd/lib]
+== cmd pid 7118
+	libdcgm.so.4 => not found
+	libcmdcgm.so => /cm/local/apps/cmd/lib/libcmdcgm.so (0x00007ffff561a000)
+	libdcgm.so.4 => not found
+/cm/local/apps/cmd/lib/libcmdcgm.so 
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4.3.0 
+== find
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4
+/cm/images/default-image/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4.3.0
+/cm/images/default-image/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so
+/cm/images/default-image/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4
+/cm/images/gpu-image/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4.3.0
+/cm/images/gpu-image/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so
+/cm/images/gpu-image/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4
+/cm/node-installer/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4.3.0
+/cm/node-installer/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so
+/cm/node-installer/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4
+	libcmdcgm.so (libc6,x86-64) => /cm/local/apps/cmd/lib/libcmdcgm.so
+== pkgs
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmoduleconfig.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulediag.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulehealth.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmoduleintrospect.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulenvswitch.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulepolicy.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmoduleprofiling.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulesysmon.so.4.3.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libnvml_injection.so.1.0.0
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libnvperf_dcgm_host.so
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgm.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmoduleconfig.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulediag.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulehealth.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmoduleintrospect.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulenvswitch.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulepolicy.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmoduleprofiling.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libdcgmmodulesysmon.so.4
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libnvml_injection.so
+/cm/local/apps/cuda-dcgm/4.3.0.1/lib64/libnvml_injection.so.1
+cuda-dcgm 1:4.5.2-100153-cm11.0-3e31a09987 | D: cuda-dcgm-libs, cm-config-cm (= 11.0) | R:  | B: 
+cuda-dcgm-libs 1:4.3.0.1-100145-cm11.0-7dedb58e8b | D: dpkg (>= 1.15.4), cm-config-cm (= 11.0) | R:  | B: 
+cuda-dcgm:
+  Installed: 1:4.5.2-100153-cm11.0-3e31a09987
+  Candidate: 1:4.5.2-100153-cm11.0-3e31a09987
+  Version table:
+ *** 1:4.5.2-100153-cm11.0-3e31a09987 500
+        500 http://updates-us-east.brightcomputing.com/deb/cm/11.0/amd64/ubuntu noble/main amd64 Packages
+        100 /var/lib/dpkg/status
+     1:4.5.2-100152-cm11.0-682e362366 500
+        500 http://updates-us-east.brightcomputing.com/deb/cm/11.0/amd64/ubuntu noble/main amd64 Packages
+     1:4.3.0.1-100146-cm11.0-eba0ef5e83 500
+        500 http://updates-us-east.brightcomputing.com/deb/cm/11.0/amd64/ubuntu noble/main amd64 Packages
+cuda-dcgm-libs:
+  Installed: 1:4.3.0.1-100145-cm11.0-7dedb58e8b
+  Candidate: 1:4.5.2-100153-cm11.0-3e31a09987
+  Version table:
+     1:4.5.2-100153-cm11.0-3e31a09987 500
+        500 http://updates-us-east.brightcomputing.com/deb/cm/11.0/amd64/ubuntu noble/main amd64 Packages
+     1:4.5.2-100152-cm11.0-682e362366 500
+        500 http://updates-us-east.brightcomputing.com/deb/cm/11.0/amd64/ubuntu noble/main amd64 Packages
+     1:4.3.0.1-100146-cm11.0-eba0ef5e83 500
+        500 http://updates-us-east.brightcomputing.com/deb/cm/11.0/amd64/ubuntu noble/main amd64 Packages
+ *** 1:4.3.0.1-100145-cm11.0-7dedb58e8b 100
+        100 /var/lib/dpkg/status
+2026-10-16 00:01:25 install cuda-dcgm:amd64 <none> 1:4.5.2-100153-cm11.0-3e31a09987
+2026-10-16 00:01:25 status half-installed cuda-dcgm:amd64 1:4.5.2-100153-cm11.0-3e31a09987
+2026-10-16 00:01:26 status unpacked cuda-dcgm:amd64 1:4.5.2-100153-cm11.0-3e31a09987
+2026-10-16 00:01:30 configure cuda-dcgm:amd64 1:4.5.2-100153-cm11.0-3e31a09987 <none>
+2026-10-16 00:01:30 status unpacked cuda-dcgm:amd64 1:4.5.2-100153-cm11.0-3e31a09987
+2026-10-16 00:01:30 status half-configured cuda-dcgm:amd64 1:4.5.2-100153-cm11.0-3e31a09987
+2026-10-16 00:01:30 status installed cuda-dcgm:amd64 1:4.5.2-100153-cm11.0-3e31a09987
+== images
+/cm/images/default-image/ cuda-dcgm=1:4.3.0.1-100145-cm11.0-7dedb58e8b cuda-dcgm-libs=1:4.3.0.1-100145-cm11.0-7dedb58e8b cuda-dcgm-nvvs=1:4.3.0.1-100145-cm11.0-7dedb58e8b 
+/cm/images/gpu-image/ cuda-dcgm=1:4.3.0.1-100146-cm11.0-eba0ef5e83 cuda-dcgm-libs=1:4.3.0.1-100146-cm11.0-eba0ef5e83 cuda-dcgm-nvvs=1:4.3.0.1-100146-cm11.0-eba0ef5e83 
+== crictl
+                )
+            )
+            kube_release_version = kube_release_tags[-1]
+            LOGGER.info(f"Kubernetes release sources version {cni_plugins_version} selected for config templates.")
+
+        cri_releases = natsort.natsorted(
+            rel
+            for rel in self.get_github_releases(
+                "kubernetes-sigs",
+                "cri-tools",
+                skip_tags=BLACKLIST_GIT_TAGS,
+            )
+            if rel.removeprefix('v').startswith(kc_version)
+        )
+        if not cri_releases:
+            raise LookupError(f"CRI-Tools release not found for kubernetes base version {kc_version}")
+
+        cri_release = cri_releases[-1]
+        kube_version = f"v{kube_full_version}"
+
+        LOGGER.info(f"CRI version {cri_release!r} will be installed for kubernetes {kube_version!r}")
+
+        kubelet_service = (
+            f"https://raw.githubusercontent.com/kubernetes/release"
+            f"/{kube_release_version}/cmd/kubepkg/templates/latest/deb/kubelet/lib/systemd/system/kubelet.service"
+        )
+        kubeadm_service = (
+            f"https://raw.githubusercontent.com/kubernetes/release"
+            f"/{kube_release_version}/cmd/kubepkg/templates/latest/deb/kubeadm/10-kubeadm.conf"
+        )
+
+        kube_paths = software_image.get_software_images_paths_from(self.state['kube_set']) | {'/'}
+
+        for image_path in kube_paths:
+            if not LinuxDistro(image_path).is_sles:
+                continue
+
+            kube_arch = KUBE_ARCH_MAP[arch_os_map[image_path]]
+
+            cni_url = (
+                f"https://github.com/containernetworking/plugins"
+                f"/releases/download/{cni_plugins_version}/cni-plugins-linux-{kube_arch}-{cni_plugins_version}.tgz"
+            )
+            crictl_url = (
+                f"https://github.com/kubernetes-sigs/cri-tools"
+                f"/releases/download/{cri_release}/crictl-{cri_release}-linux-{kube_arch}.tar.gz"
+            )
+
+            os.makedirs(join_paths(image_path, CNI_INSTALL_ROOT), exist_ok=True)
+            os.makedirs(join_paths(image_path, '/etc/systemd/system/kubelet.service.d'), exist_ok=True)
+
+            with self.subprocess.chroot(image_path):
+                # install CNI
+                self.subprocess.check_call(
+                    [
+                        "/bin/bash",
+                        "-c",
+                        f'set -o pipefail; CURL_HOME=/tmp curl -L {cni_url} | sudo tar -C "{CNI_INSTALL_ROOT}" -xz',
+                    ]
+                )
+                # Install crictl
+                self.subprocess.check_call(
+                    [
+                        "/bin/bash",
+                        "-c",
+                        f'set -o pipefail; CURL_HOME=/tmp curl -L {crictl_url} | sudo tar -C {KUBE_BINDIR} -xz',
+                    ]
+                )
+
+            # Install kubeadm, kubelet, kubectl
+            for target in consts.KUBEADM_PACKAGES:
+                full_path = join_paths(image_path, KUBE_BINDIR, target)
+                with (
+                    requests.get(
+                        f"https://dl.k8s.io/release/{kube_version}/bin/linux/{kube_arch}/{target}",
+                        stream=True,
+                        timeout=120,
+                    ) as resp,
+                    tempfile.NamedTemporaryFile(dir=os.path.dirname(full_path)) as tmpfile,
+                ):
+                    resp.raise_for_status()
+/cm/local/apps/cm-setup/lib/python3.12/site-packages/cmsetup/plugins/kubernetes/stages/install.py:56:KUBE_BINDIR = "/usr/bin"
+1318:      url: https://kubeflow.github.io/spark-operator
+1425:      path: /etc/crictl.yaml
+2091:    url: https://kyverno.github.io/kyverno/
+2212:      url: https://grafana.github.io/helm-charts
+2277:      url: https://grafana.github.io/helm-charts
+2320:      url: https://grafana.github.io/helm-charts
+2365:      url: https://kubernetes.github.io/ingress-nginx
+2400:      url: https://knative.github.io/operator
+2421:      url: https://kubernetes.github.io/dashboard/
+2459:      url: https://kubernetes-sigs.github.io/metrics-server/
+2480:      url: https://prometheus-community.github.io/helm-charts
+2514:      url: https://metallb.github.io/metallb
+2734:      url: https://prometheus-community.github.io/helm-charts
+2797:      url: https://prometheus-community.github.io/helm-charts
+3083:      url: https://kubeflow.github.io/spark-operator
+3190:      path: /etc/crictl.yaml
+3678:'CURL_HOME=/tmp curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3'
+3680:D 26-10-16 00:00:56 | exec_helpers.Subprocess | Command 'CURL_HOME=/tmp curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3' exit code: EX_OK<0(0x00)>
+3695:'CURL_HOME=/tmp curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3'
+3697:D 26-10-16 00:00:58 | exec_helpers.Subprocess | Command 'CURL_HOME=/tmp curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3' exit code: EX_OK<0(0x00)>
