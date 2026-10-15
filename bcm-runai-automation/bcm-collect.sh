@@ -332,8 +332,35 @@ hdr "Podsumowanie"
 } >>"$REPORT"
 info "PASS=$CNT_PASS WARN=$CNT_WARN FAIL=$CNT_FAIL"
 
+# Jeden plik tekstowy ze wszystkim (raport + discovered.env + raw/), do przesłania jako .txt
+ALLTXT=$WORKDIR.txt
+MAXL=${BCM_COLLECT_MAX_LINES:-3000}   # limit linii na pojedynczy plik raw (0 = bez limitu)
+{
+  echo "######## BCM COLLECT: $(hostname) $(date -Is)"
+  echo "######## Pliki: report.txt, discovered.env, raw/* (sekrety zamaskowane)"
+  echo
+  echo "================================================================ report.txt"
+  cat "$REPORT"
+  echo
+  echo "================================================================ discovered.env"
+  cat "$WORKDIR/discovered.env"
+  for f in $(find "$WORKDIR" -type f ! -name report.txt ! -name discovered.env | sort); do
+    grep -qI . "$f" 2>/dev/null || [ ! -s "$f" ] || continue   # pomiń pliki binarne
+    n=$(wc -l <"$f")
+    echo
+    echo "================================================================ ${f#"$WORKDIR"/} ($n linii)"
+    if [ "$MAXL" -gt 0 ] && [ "$n" -gt "$MAXL" ]; then
+      head -n "$MAXL" "$f"; echo "... [obcięto: $((n - MAXL)) linii; pełna wersja w .tar.gz]"
+    else
+      cat "$f"
+    fi
+  done
+} | mask_secrets >"$ALLTXT"
+chmod 600 "$ALLTXT"
+
 tar -C "$(dirname "$WORKDIR")" -czf "$WORKDIR.tar.gz" "$(basename "$WORKDIR")"
 chmod 600 "$WORKDIR.tar.gz"
 ok "Raport:   $REPORT"
-ok "Archiwum: $WORKDIR.tar.gz   (pobierz przez SFTP i prześlij do analizy)"
+ok "Wszystko w jednym pliku: $ALLTXT ($(du -h "$ALLTXT" | cut -f1))   <- prześlij ten plik do analizy"
+ok "Archiwum: $WORKDIR.tar.gz   (alternatywnie, pełne dane)"
 [ "$CNT_FAIL" -gt 0 ] && exit 1 || exit 0
