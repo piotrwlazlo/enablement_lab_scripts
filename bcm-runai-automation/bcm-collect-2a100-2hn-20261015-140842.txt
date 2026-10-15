@@ -1,0 +1,588 @@
+######## BCM COLLECT: 2a100-2hn 2026-10-15T14:09:43+02:00
+######## Pliki: report.txt, discovered.env, raw/* (sekrety zamaskowane)
+
+================================================================ report.txt
+BCM / Kubernetes / Run:ai - raport kolektora
+Host: 2a100-2hn   Data: 2026-10-15T14:08:42+02:00   Skrypt: ./bcm-collect.sh
+
+STAN  | SPRAWDZENIE                                   | SZCZEGÓŁY
+------+-----------------------------------------------+---------------------------------------------
+INFO  | System head node                              | ubuntu 24.04 (rodzina: debian, pakiety: dpkg), kernel 6.8.0-51-generic
+PASS  | Wersja BCM                                    | 11.30.0 (źródło: cm-package-release-info)
+PASS  | Ścieżka wdrożenia                          | flow_bcm11_single: BCM 11.0-11.32.x: jeden kreator cm-kubernetes-setup z opcją 'Run:ai (self-hosted)' (Ingress NGINX, Run:ai 2.23/2.22)
+WARN  | BCM < 11.33.1                                 | Rozważ aktualizację do >= 11.33.1 (osobny kreator cm-runai-setup, Run:ai 2.25). Zob. docs, rozdz. 2.
+PASS  | Komenda cm-kubernetes-setup                   | /cm/local/apps/cm-setup/bin/cm-kubernetes-setup
+INFO  | Komenda cm-runai-setup                        | brak - normalne dla flow_bcm11_single
+INFO  | Komenda helm                                  | brak w PATH (pojawi się po module load kubernetes)
+INFO  | Zainstalowane pakiety Kubernetes              | brak
+INFO  | Wersje K8s w kreatorze                        | 1.34 1.33 1.32 -> proponowana: 1.34
+INFO  | Head node(s)                                  | 2a100-2hn (aktywny: 2a100-2hn, HA: no, IP: 10.142.255.254)
+PASS  | Miejsce /var/lib (etcd)                       | 466G
+PASS  | Miejsce /cm/shared (local-path PVC)           | 466G
+INFO  | RAM head node                                 | 15G
+INFO  | Węzły obliczeniowe w BCM                    | 1
+PASS  | Węzły GPU (UP)                              | node001:2 (razem 2 GPU)
+INFO  | Modele GPU                                    | node001:NVIDIA_A100-SXM4-40GB
+INFO  | Sterownik NVIDIA                              | node001:570.172.08
+INFO  | Sterownik GPU                                 | z obrazu BCM -> w GPU Operator: driver.enabled = OFF
+INFO  | node001: obraz                                | default-image (category:default)
+PASS  | node001: cgroup v2                            | cgroup2fs
+PASS  | node001: /cm/shared zamontowany               | 
+PASS  | node001: zegar                                | różnica 0s
+PASS  | node001: internet registry.k8s.io             | 
+PASS  | node001: internet nvcr.io                     | 
+WARN  | Obraz default-image: pakiety NVIDIA bez apt-mark hold | apt upgrade w obrazie może rozjechać FM/nscq/imex vs driver
+INFO  | Sieć węzłów (MetalLB L2)                  | internalnet 10.142.0.0/16, brama 0.0.0.0, dynamic range 10.142.160.0-10.142.167.255, domena eth.cluster
+WARN  | Jump host poza siecią węzłów              | 192.168.36.236 poza 10.142.0.0/16 - potrzebna trasa do 10.142.0.0/16, proxy head node (port 443) albo tunel SOCKS
+PASS  | Wolne IP dla LoadBalancer (2 szt.)            | 10.142.255.253 10.142.255.252 (spoza dynamic range, brak w BCM, brak odpowiedzi ping/ARP)
+INFO  | Wolne IP - potwierdzenie                      | zapytaj zespół sieciowy, czy 10.142.255.253 10.142.255.252 nie są używane poza BCM (switche, iDRAC/BMC)
+INFO  | Proponowane CIDR K8s                          | service 10.150.0.0/16, pod 172.29.0.0/16 (bez kolizji z sieciami BCM i trasami)
+FAIL  | Kolizja CIDR                                  | 10.150.0.0/16 z 0.0.0.0/0
+FAIL  | Kolizja CIDR                                  | 172.29.0.0/16 z 0.0.0.0/0
+INFO  | MTU interfejsów head node                    | 1500 65536
+PASS  | HTTPS https://registry.k8s.io                 | HTTP 307
+PASS  | HTTPS https://nvcr.io                         | HTTP 200
+PASS  | HTTPS https://helm.ngc.nvidia.com             | HTTP 404
+PASS  | HTTPS https://registry-1.docker.io            | HTTP 404
+PASS  | HTTPS https://quay.io                         | HTTP 200
+PASS  | HTTPS https://ghcr.io                         | HTTP 301
+PASS  | HTTPS https://github.com                      | HTTP 200
+PASS  | HTTPS https://runai.jfrog.io                  | HTTP 200
+INFO  | Pliki BIND                                    | /etc/bind/named.conf, include: /etc/bind/named.conf.include, strefy: /etc/bind
+PASS  | named.conf zawiera include                    | /etc/bind/named.conf.include
+INFO  | FQDN Run:ai (proponowany)                     | runai.2a100-2hn.internal -> nie rozwiązuje się (deploy utworzy strefę BIND)
+INFO  | Klastry K8s w BCM                             | brak - czysta instalacja
+INFO  | Katalog /cm/shared/runai                      | brak - deploy go utworzy
+INFO  | Konfiguracja kreatora                         | brak zapisanych plików /root/cm-*-setup*.conf
+
+PODSUMOWANIE: PASS=21 WARN=3 FAIL=2
+
+Wartości proponowane dla wdrożenia (discovered.env):
+  BCM_RELEASE=11.30.0
+  BCM_SRC=cm-package-release-info
+  BCM_FLOW=flow_bcm11_single
+  OS_ID=ubuntu
+  OS_VER=24.04
+  OS_FAMILY=debian
+  D_HEAD_NODES=2a100-2hn
+  D_ACTIVE_HEAD=2a100-2hn
+  D_HA=no
+  D_HEAD_IP=10.142.255.254
+  D_GPU_NODES=node001
+  D_GPU_COUNTS=node001:2
+  D_GPU_TOTAL=2
+  D_GPU_MODELS=node001:NVIDIA_A100-SXM4-40GB
+  D_DRIVERS=node001:570.172.08
+  D_NVSWITCH=no
+  D_DRIVER_FROM_IMAGE=yes
+  D_CPU_NODES=''
+  D_DOWN_NODES=''
+  D_WORKERS=node001
+  D_WORKER_CATEGORIES=default
+  D_CATEGORY_EXTRA=''
+  D_NODE_NET=internalnet
+  D_NET_CIDR=10.142.0.0/16
+  D_NET_GW=0.0.0.0
+  D_NET_DOMAIN=eth.cluster
+  D_NET_DYN=10.142.160.0-10.142.167.255
+  D_CLIENT_IP=192.168.36.236
+  D_CLIENT_IN_NET=no
+  D_LB_NEED=2
+  D_LB_IPS=10.142.255.253\ 10.142.255.252
+  D_SVC_CIDR=10.150.0.0/16
+  D_POD_CIDR=172.29.0.0/16
+  D_K8S_CLUSTERS=''
+  D_K8S_VERSIONS=1.34\ 1.33\ 1.32
+  D_K8S_VERSION=1.34
+  D_DOMAIN=2a100-2hn.internal
+  D_RUNAI_FQDN=runai.2a100-2hn.internal
+  D_INFERENCE_WILDCARD=\*.inference.2a100-2hn.internal
+
+================================================================ discovered.env
+# Wygenerowane przez bcm-collect.sh 2026-10-15T14:09:18+02:00 na 2a100-2hn
+BCM_RELEASE=11.30.0
+BCM_SRC=cm-package-release-info
+BCM_FLOW=flow_bcm11_single
+OS_ID=ubuntu
+OS_VER=24.04
+OS_FAMILY=debian
+D_HEAD_NODES=2a100-2hn
+D_ACTIVE_HEAD=2a100-2hn
+D_HA=no
+D_HEAD_IP=10.142.255.254
+D_GPU_NODES=node001
+D_GPU_COUNTS=node001:2
+D_GPU_TOTAL=2
+D_GPU_MODELS=node001:NVIDIA_A100-SXM4-40GB
+D_DRIVERS=node001:570.172.08
+D_NVSWITCH=no
+D_DRIVER_FROM_IMAGE=yes
+D_CPU_NODES=''
+D_DOWN_NODES=''
+D_WORKERS=node001
+D_WORKER_CATEGORIES=default
+D_CATEGORY_EXTRA=''
+D_NODE_NET=internalnet
+D_NET_CIDR=10.142.0.0/16
+D_NET_GW=0.0.0.0
+D_NET_DOMAIN=eth.cluster
+D_NET_DYN=10.142.160.0-10.142.167.255
+D_CLIENT_IP=192.168.36.236
+D_CLIENT_IN_NET=no
+D_LB_NEED=2
+D_LB_IPS=10.142.255.253\ 10.142.255.252
+D_SVC_CIDR=10.150.0.0/16
+D_POD_CIDR=172.29.0.0/16
+D_K8S_CLUSTERS=''
+D_K8S_VERSIONS=1.34\ 1.33\ 1.32
+D_K8S_VERSION=1.34
+D_DOMAIN=2a100-2hn.internal
+D_RUNAI_FQDN=runai.2a100-2hn.internal
+D_INFERENCE_WILDCARD=\*.inference.2a100-2hn.internal
+
+================================================================ collect.log (72 linii)
+
+[1m===== Wykrywanie środowiska (może potrwać kilka minut) =====[0m
+
+[1m===== 1. BCM i system operacyjny =====[0m
+[34m[INFO][0m System head node - ubuntu 24.04 (rodzina: debian, pakiety: dpkg), kernel 6.8.0-51-generic
+[32m[ OK ][0m Wersja BCM - 11.30.0 (źródło: cm-package-release-info)
+[32m[ OK ][0m Ścieżka wdrożenia - flow_bcm11_single: BCM 11.0-11.32.x: jeden kreator cm-kubernetes-setup z opcją 'Run:ai (self-hosted)' (Ingress NGINX, Run:ai 2.23/2.22)
+[33m[WARN][0m BCM < 11.33.1 - Rozważ aktualizację do >= 11.33.1 (osobny kreator cm-runai-setup, Run:ai 2.25). Zob. docs, rozdz. 2.
+[32m[ OK ][0m Komenda cm-kubernetes-setup - /cm/local/apps/cm-setup/bin/cm-kubernetes-setup
+[34m[INFO][0m Komenda cm-runai-setup - brak - normalne dla flow_bcm11_single
+[34m[INFO][0m Komenda helm - brak w PATH (pojawi się po module load kubernetes)
+[34m[INFO][0m Zainstalowane pakiety Kubernetes - brak
+[34m[INFO][0m Wersje K8s w kreatorze - 1.34 1.33 1.32 -> proponowana: 1.34
+
+[1m===== 2. Head node(s) =====[0m
+[34m[INFO][0m Head node(s) - 2a100-2hn (aktywny: 2a100-2hn, HA: no, IP: 10.142.255.254)
+[32m[ OK ][0m Miejsce /var/lib (etcd) - 466G
+[32m[ OK ][0m Miejsce /cm/shared (local-path PVC) - 466G
+[34m[INFO][0m RAM head node - 15G
+
+[1m===== 3. Węzły i GPU =====[0m
+[34m[INFO][0m Węzły obliczeniowe w BCM - 1
+[32m[ OK ][0m Węzły GPU (UP) - node001:2 (razem 2 GPU)
+[34m[INFO][0m Modele GPU - node001:NVIDIA_A100-SXM4-40GB
+[34m[INFO][0m Sterownik NVIDIA - node001:570.172.08
+[34m[INFO][0m Sterownik GPU - z obrazu BCM -> w GPU Operator: driver.enabled = OFF
+
+[1m=====    Węzeł node001 =====[0m
+[34m[INFO][0m node001: obraz - default-image (category:default)
+[32m[ OK ][0m node001: cgroup v2 - cgroup2fs
+[32m[ OK ][0m node001: /cm/shared zamontowany
+[32m[ OK ][0m node001: zegar - różnica 0s
+[32m[ OK ][0m node001: internet registry.k8s.io
+[32m[ OK ][0m node001: internet nvcr.io
+[33m[WARN][0m Obraz default-image: pakiety NVIDIA bez apt-mark hold - apt upgrade w obrazie może rozjechać FM/nscq/imex vs driver
+
+[1m===== 4. Sieć =====[0m
+[34m[INFO][0m Sieć węzłów (MetalLB L2) - internalnet 10.142.0.0/16, brama 0.0.0.0, dynamic range 10.142.160.0-10.142.167.255, domena eth.cluster
+[33m[WARN][0m Jump host poza siecią węzłów - 192.168.36.236 poza 10.142.0.0/16 - potrzebna trasa do 10.142.0.0/16, proxy head node (port 443) albo tunel SOCKS
+[32m[ OK ][0m Wolne IP dla LoadBalancer (2 szt.) - 10.142.255.253 10.142.255.252 (spoza dynamic range, brak w BCM, brak odpowiedzi ping/ARP)
+[34m[INFO][0m Wolne IP - potwierdzenie - zapytaj zespół sieciowy, czy 10.142.255.253 10.142.255.252 nie są używane poza BCM (switche, iDRAC/BMC)
+[34m[INFO][0m Proponowane CIDR K8s - service 10.150.0.0/16, pod 172.29.0.0/16 (bez kolizji z sieciami BCM i trasami)
+[31m[FAIL][0m Kolizja CIDR - 10.150.0.0/16 z 0.0.0.0/0
+[31m[FAIL][0m Kolizja CIDR - 172.29.0.0/16 z 0.0.0.0/0
+[34m[INFO][0m MTU interfejsów head node - 1500 65536
+
+[1m===== 5. Internet / rejestry / proxy =====[0m
+[32m[ OK ][0m HTTPS https://registry.k8s.io - HTTP 307
+[32m[ OK ][0m HTTPS https://nvcr.io - HTTP 200
+[32m[ OK ][0m HTTPS https://helm.ngc.nvidia.com - HTTP 404
+[32m[ OK ][0m HTTPS https://registry-1.docker.io - HTTP 404
+[32m[ OK ][0m HTTPS https://quay.io - HTTP 200
+[32m[ OK ][0m HTTPS https://ghcr.io - HTTP 301
+[32m[ OK ][0m HTTPS https://github.com - HTTP 200
+[32m[ OK ][0m HTTPS https://runai.jfrog.io - HTTP 200
+
+[1m===== 6. DNS =====[0m
+[34m[INFO][0m Pliki BIND - /etc/bind/named.conf, include: /etc/bind/named.conf.include, strefy: /etc/bind
+[32m[ OK ][0m named.conf zawiera include - /etc/bind/named.conf.include
+[34m[INFO][0m FQDN Run:ai (proponowany) - runai.2a100-2hn.internal -> nie rozwiązuje się (deploy utworzy strefę BIND)
+
+[1m===== 7. Istniejący Kubernetes =====[0m
+[34m[INFO][0m Klastry K8s w BCM - brak - czysta instalacja
+
+[1m===== 8. Pliki Run:ai i certyfikaty =====[0m
+[34m[INFO][0m Katalog /cm/shared/runai - brak - deploy go utworzy
+
+[1m===== 9. Zapisane konfiguracje kreatorów (szablony do automatyzacji -c) =====[0m
+[34m[INFO][0m Konfiguracja kreatora - brak zapisanych plików /root/cm-*-setup*.conf
+
+[1m===== Podsumowanie =====[0m
+[34m[INFO][0m PASS=21 WARN=3 FAIL=2
+
+================================================================ devices.tsv (2 linii)
+HeadNode	2a100-2hn	00:50:56:8F:18:6E		10.142.255.254	internalnet
+PhysicalNode	node001	00:50:56:8F:21:61	default	10.142.0.1	internalnet
+
+================================================================ gpus.tsv (1 linii)
+node001	2	NVIDIA A100-SXM4-40GB	570.172.08	0	2
+
+================================================================ networks.txt (3 linii)
+externalnet 192.168.36.0/24 efrc.lab
+globalnet 0.0.0.0/0 cm.cluster
+internalnet 10.142.0.0/16 eth.cluster
+
+================================================================ networks.txt.routes (2 linii)
+10.142.0.0/16
+192.168.36.0/24
+
+================================================================ raw/bcm-release.txt (5 linii)
+### cm-package-release-info -f cm-setup,cmdaemon
+Name      Version    Release(s)
+--------  ---------  ------------
+cm-setup  123360     11.30.0
+cmdaemon  163803     11.30.0
+
+================================================================ raw/cmsh-category-list.txt (3 linii)
+### cmsh -c category; list
+default                  default-image            1       
+gpu                      gpu-image                0       
+
+================================================================ raw/cmsh-device-list.txt (3 linii)
+### cmsh -c device; list
+HeadNode         2a100-2hn        00:50:56:8F:18:6E                   10.142.255.254   internalnet      [   UP   ]                      
+PhysicalNode     node001          00:50:56:8F:21:61  default          10.142.0.1       internalnet      [   UP   ], health check failed 
+
+================================================================ raw/cmsh-device-status.txt (3 linii)
+### cmsh -c device; status
+2a100-2hn ................ [   UP   ]
+node001 .................. [   UP   ], health check failed
+
+================================================================ raw/cmsh-kubernetes-list.txt (1 linii)
+### cmsh -c kubernetes; list
+
+================================================================ raw/cmsh-network-externalnet.txt (27 linii)
+### cmsh -c network; show externalnet
+Name                             externalnet                                     
+Private Cloud                                                                    
+Revision                                                                         
+Domain Name                      efrc.lab                                        
+Type                             External                                        
+MTU                              1500                                            
+Allow autosign                   Automatic                                       
+Write DNS zone                   both                                            
+Node booting                     no                                              
+Lock down dhcpd                  no                                              
+Management allowed               no                                              
+Search domain index              0                                               
+Exclude from search domain       no                                              
+Disable automatic exports        yes                                             
+Base address                     192.168.36.0                                    
+Broadcast address                192.168.36.255                                  
+Dynamic range start              0.0.0.0                                         
+Dynamic range end                0.0.0.0                                         
+Netmask bits                     24                                              
+Gateway                          192.168.36.1                                    
+Gateway metric                   0                                               
+IPv6                             no                                              
+Cloud Subnet ID                                                                  
+EC2AvailabilityZone                                                              
+Layer3                           no                                              
+Notes                            <0B>                                            
+
+================================================================ raw/cmsh-network-globalnet.txt (26 linii)
+### cmsh -c network; show globalnet
+Name                             globalnet                                       
+Private Cloud                                                                    
+Revision                         type1                                           
+Domain Name                      cm.cluster                                      
+Type                             Global                                          
+MTU                              1500                                            
+Allow autosign                   Automatic                                       
+Write DNS zone                   both                                            
+Node booting                     no                                              
+Lock down dhcpd                  no                                              
+Management allowed               no                                              
+Search domain index              0                                               
+Exclude from search domain       no                                              
+Disable automatic exports        no                                              
+Base address                     0.0.0.0                                         
+Broadcast address                255.255.255.255                                 
+Dynamic range start              0.0.0.0                                         
+Dynamic range end                0.0.0.0                                         
+Netmask bits                     0                                               
+Gateway                          0.0.0.0                                         
+Gateway metric                   0                                               
+Cloud Subnet ID                                                                  
+EC2AvailabilityZone                                                              
+Layer3                           no                                              
+Notes                            <0B>                                            
+
+================================================================ raw/cmsh-network-internalnet.txt (26 linii)
+### cmsh -c network; show internalnet
+Name                             internalnet                                     
+Private Cloud                                                                    
+Revision                                                                         
+Domain Name                      eth.cluster                                     
+Type                             Internal                                        
+MTU                              1500                                            
+Allow autosign                   Automatic                                       
+Write DNS zone                   both                                            
+Node booting                     yes                                             
+Lock down dhcpd                  no                                              
+Management allowed               yes                                             
+Search domain index              0                                               
+Exclude from search domain       no                                              
+Disable automatic exports        no                                              
+Base address                     10.142.0.0                                      
+Broadcast address                10.142.255.255                                  
+Dynamic range start              10.142.160.0                                    
+Dynamic range end                10.142.167.255                                  
+Netmask bits                     16                                              
+Gateway                          0.0.0.0                                         
+Gateway metric                   0                                               
+Cloud Subnet ID                                                                  
+EC2AvailabilityZone                                                              
+Layer3                           no                                              
+Notes                            <0B>                                            
+
+================================================================ raw/cmsh-network-list.txt (4 linii)
+### cmsh -c network; list
+externalnet        External       24             192.168.36.0     efrc.lab             no  
+globalnet          Global         0              0.0.0.0          cm.cluster               
+internalnet        Internal       16             10.142.0.0       eth.cluster              
+
+================================================================ raw/cmsh-overlay-list.txt (1 linii)
+### cmsh -c configurationoverlay; list
+
+================================================================ raw/cmsh-softwareimage-list.txt (3 linii)
+### cmsh -c softwareimage; list
+default-image        /cm/images/default-image                 6.8.0-51-generic  1       
+gpu-image            /cm/images/gpu-image                     6.8.0-51-generic  0       
+
+================================================================ raw/cmsh-softwareimage-locked.txt (3 linii)
+### cmsh -c softwareimage; islocked
+default-image  no      
+gpu-image      no      
+
+================================================================ raw/cmsh-versioninfo.txt (6 linii)
+### cmsh -c main; versioninfo
+Cluster Manager          11.0                                                
+CMDaemon                 3.1                                                 
+CMDaemon Build Index     163803                                              
+CMDaemon Build Hash      4350e03575                                          
+Database Version         36388                                               
+
+================================================================ raw/devices.tsv (2 linii)
+HeadNode	2a100-2hn	00:50:56:8F:18:6E		10.142.255.254	internalnet
+PhysicalNode	node001	00:50:56:8F:21:61	default	10.142.0.1	internalnet
+
+================================================================ raw/gpus.tsv (1 linii)
+node001	2	NVIDIA A100-SXM4-40GB	570.172.08	0	2
+
+================================================================ raw/ip-addr.txt (12 linii)
+### ip -o -4 addr; echo; ip route; echo; ip -o link | awk '{print $2, $4, $5}'
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+2: ens160    inet 10.142.255.254/16 brd 10.142.255.255 scope global ens160\       valid_lft forever preferred_lft forever
+3: ens192    inet 192.168.36.204/24 brd 192.168.36.255 scope global ens192\       valid_lft forever preferred_lft forever
+
+default via 192.168.36.1 dev ens192 onlink 
+10.142.0.0/16 dev ens160 proto kernel scope link src 10.142.255.254 
+192.168.36.0/24 dev ens192 proto kernel scope link src 192.168.36.204 
+
+lo: mtu 65536
+ens160: mtu 1500
+ens192: mtu 1500
+
+================================================================ raw/named.conf.include (0 linii)
+
+================================================================ raw/named-zones.txt (6 linii)
+/etc/bind/named.conf:zone "." in 
+/etc/bind/named.conf:zone "localhost" in 
+/etc/bind/named.conf:zone "0.0.127.in-addr.arpa" in 
+/etc/bind/named.conf:zone "142.10.in-addr.arpa" in 
+/etc/bind/named.conf:zone "cm.cluster" in 
+/etc/bind/named.conf:zone "eth.cluster" in 
+
+================================================================ raw/node-node001-df.txt (2 linii)
+Filesystem         Size  Used Avail Use% Mounted on
+master:/cm/shared  495G   29G  466G   6% /cm/shared
+
+================================================================ raw/node-node001-nvidia.txt (36 linii)
+### ssh -o BatchMode=yes node001 'nvidia-smi; cat /proc/driver/nvidia/version; nvidia-smi -q | grep -A3 -i "^ *Fabric"' 
+Thu Oct 15 14:09:35 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.172.08             Driver Version: 570.172.08     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA A100-SXM4-40GB          On  |   00000000:0B:00.0 Off |                    0 |
+| N/A   30C    P0             45W /  400W |       0MiB /  40960MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA A100-SXM4-40GB          On  |   00000000:14:00.0 Off |                    0 |
+| N/A   27C    P0             42W /  400W |       0MiB /  40960MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  570.172.08  Release Build  (dvs-builder@U22-I3-AF01-21-3)  Tue Jul  8 18:08:21 UTC 2025
+GCC version:  gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04) 
+    Fabric
+        State                             : N/A
+        Status                            : N/A
+        CliqueId                          : N/A
+--
+    Fabric
+        State                             : N/A
+        Status                            : N/A
+        CliqueId                          : N/A
+
+================================================================ raw/node-node001-roles.txt (1 linii)
+### cmsh -c 'device; use node001; roles; list'
+
+================================================================ raw/packages-cm.txt (96 linii)
+### pkg_list () 
+{ 
+    case $PKG in 
+        dpkg)
+            dpkg-query -W -f='${Status} ${Package} ${Version}\n' 2> /dev/null | awk '/install ok installed/{print $4, $5}' | grep -E "$1"
+        ;;
+        rpm)
+            rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE}\n' 2> /dev/null | grep -E "$1"
+        ;;
+    esac
+}; PKG=dpkg; pkg_list '^(cm-|cmdaemon|cuda-|nvidia|libnvidia|kube|containerd|helm)'
+cm-api-docs 11.0-102222-cm11.0-ba1aa5affa
+cm-atftp 0.8.0-120-cm11.0
+cm-atftp-server 0.8.0-120-cm11.0
+cm-bios-tools 11.0-100362-cm11.0-379885827e
+cm-boost 1.81.0-224-cm11.0
+cm-busybox 1.36.0-111-cm11.0
+cm-config-apt 11.0-100060-cm11.0-b097dacf9a
+cm-config-apt-cuda 11.0-100060-cm11.0-b097dacf9a
+cm-config-cm 11.0
+cm-config-cmsupport-files 11.0-100043-cm11.0-4e3eebff56
+cm-config-dhclient 11.0-62-cm11.0
+cm-config-grub 11.0-105-cm11.0
+cm-config-http-bcm 11.0-100092-cm11.0-794000162c
+cm-config-ldap-client-master 11.0-157-cm11.0
+cm-config-limits 11.0-69-cm11.0
+cm-config-man 11.0-95-cm11.0
+cm-config-motd 11.0-195-cm11.0
+cm-config-mysql 11.0-122-cm11.0
+cm-config-nfsserver 11.0-131-cm11.0
+cm-config-os-arch 11.0-100005-cm11.0-9eb5205537
+cm-config-rootfiles 11.0-168-cm11.0
+cm-config-snmp 11.0-100007-cm11.0-136947f266
+cm-config-ssh 11.0-120-cm11.0
+cm-config-sysctl 11.0-99-cm11.0
+cm-config-syslog 11.0-167-cm11.0
+cm-config-systemd-master 11.0-115-cm11.0
+cm-confuse 3.3-93-cm11.0
+cm-conman 0.3.1-80-cm11.0
+cm-crontabs-master 11.0-33-cm11.0
+cm-curl 2:8.4.0-100193-cm11.0-11c4953530
+cm-dhcp 4.4.3-122-cm11.0
+cm-freeipmi 1.6.14-97-cm11.0
+cm-gcc 14.2.0-100147-cm11.0-fbc4cae9ad
+cm-gmp 6.3.0-100147-cm11.0-fbc4cae9ad
+cm-hwloc 1.11.13-91-cm11.0
+cm-hwloc2 2.8.0-100011-cm11.0-cd6df90c03
+cm-image 11.0-100836-cm11.0-9850d56383
+cm-installer-rescue 11.0-103492-cm11.0-f1bb8f1626
+cm-iperf 3.17.1-100036-cm11.0-63c91c9f9a
+cm-ipmitool 1.8.19-93-cm11.0
+cm-libprometheus 2.53.0-100157-cm11.0-24f6289fa7
+cm-lite-daemon-dist 11.0-100777-cm11.0-f2596269e7
+cm-lsf 11.0-100040-cm11.0-a77577fcc5
+cm-lsf-client 11.0-100040-cm11.0-a77577fcc5
+cm-lshw 2:02.19.2-58-cm11.0
+cm-lua 5.4.7-53-cm11.0
+cm-luajit 2.1-100015-cm11.0-7ea1b3e8e5
+cm-manuals 11.0-110564-cm11.0-6be1266bb3
+cm-mariadb-libs 10.11.2-100180-cm11.0-c8bdf96ef5
+cm-master 11.0-56-cm11.0
+cm-modules 4.5.3-100105-cm11.0-87f0a179eb
+cm-modules-init 11.0-100048-cm11.0-1bd20d31f0
+cm-mpc 1.3.1-100147-cm11.0-fbc4cae9ad
+cm-mpfr 4.2.1-100147-cm11.0-fbc4cae9ad
+cm-mysql++ 3.3.0-497-cm11.0
+cm-mysql++-devel 3.3.0-497-cm11.0
+cm-nvfwupd 2.0.8-100018-cm11.0-8c1866ef3d
+cm-nvssvt 1.3.2-100004-cm11.0-48d83c5374
+cm-openblas 0.3.28-100087-cm11.0-d806eca240
+cm-openssl 3.1.8-100198-cm11.0-026d50d170
+cm-openvpn 2.5.4-100165-cm11.0-d6f2c8fed3
+cm-pmix3 3.1.7-100046-cm11.0-1675d879e1
+cm-pmix4 4.1.3-100016-cm11.0-c98510a74a
+cm-prs 1.0.4-100302-cm11.0-752743ceca
+cm-python3 11.0-100156-cm11.0-d510c02d7d
+cm-python312 3.12.11-100038-cm11.0-df50704768
+cm-qemu-user-static 1:7.2.16-100025-cm11.0-b29fecd7eb
+cm-rocm-smi 4.3.0-100004-cm11.0-539b71b6f9
+cm-rsync 3.2.7-100026-cm11.0-e3eb14f7b0
+cm-scale 11.0-100888-cm11.0-c28a22d371
+cm-sdparm 1.12-59-cm11.0
+cm-sedutil 1.16.0-100019-cm11.0-04ffac10f4
+cm-setup 11.0-123360-cm11.0-28cea0a704
+cm-shorewall-config 1.0.0-160-cm11.0
+cm-tftpboot 11.0-202-cm11.0
+cm-ucx 1.18.0-100051-cm11.0-2e601fb72a
+cm-uge 11.0-100059-cm11.0-7d26fcb7a6
+cm-uge-client 11.0-100059-cm11.0-7d26fcb7a6
+cm-webportal 11.0-107275-cm11.0-cf944e9416
+cm-workload 11.0-126-cm11.0
+cmdaemon 11.0-163803-cm11.0-4350e03575
+cmdaemon-cmsh 11.0-163803-cm11.0-4350e03575
+cmdaemon-pythoncm 11.0-163803-cm11.0-4350e03575
+cmdaemon-remotecm 11.0-163803-cm11.0-4350e03575
+cuda-dcgm-libs 1:4.3.0.1-100145-cm11.0-7dedb58e8b
+
+================================================================ raw/proxy-env.txt (0 linii)
+
+================================================================ raw/resolv.conf (19 linii)
+# This is /run/systemd/resolve/resolv.conf managed by man:systemd-resolved(8).
+# Do not edit.
+#
+# This file might be symlinked as /etc/resolv.conf. If you're looking at
+# /etc/resolv.conf and seeing this text, you have followed the symlink.
+#
+# This is a dynamic resolv.conf file for connecting local clients directly to
+# all known uplink DNS servers. This file lists all configured search domains.
+#
+# Third party programs should typically not access this file directly, but only
+# through the symlink at /etc/resolv.conf. To manage man:resolv.conf(5) in a
+# different way, replace this symlink by a static file or a different symlink.
+#
+# See man:systemd-resolved.service(8) for details about the supported modes of
+# operation for /etc/resolv.conf.
+
+nameserver 127.0.0.1
+nameserver 192.168.24.10
+search cm.cluster eth.cluster efrc.lab
+
+================================================================ raw/status.tsv (2 linii)
+2a100-2hn	UP
+node001	UP
+
+================================================================ raw/timedatectl.txt (8 linii)
+### timedatectl
+               Local time: Thu 2026-10-15 14:09:43 CEST
+           Universal time: Thu 2026-10-15 12:09:43 UTC
+                 RTC time: Thu 2026-10-15 12:09:42
+                Time zone: Europe/Amsterdam (CEST, +0200)
+System clock synchronized: yes
+              NTP service: n/a
+          RTC in local TZ: no
+
+================================================================ status.tsv (2 linii)
+2a100-2hn	UP
+node001	UP
+
+================================================================ used-ips.txt (3 linii)
+10.142.0.1
+10.142.255.254
+192.168.36.204
