@@ -128,7 +128,7 @@ health_report() {
   rawsh "health-$n.txt" "cmsh -c 'device; use $n; latesthealthdata'"
   while IFS='|' read -r m p i; do
     [ -n "$m" ] || continue
-    hint=; grep -qiE 'nvlink|link' <<<"$m $i" && hint=" -> diagnoza/naprawa: ./bcm-nvlink-fix.sh --node $n"
+    hint=; grep -qiE 'nvlink|link' <<<"$m $i" && hint=" (VM z częścią płyty HGX: oczekiwane; wyciszenie: cmsh -c \"monitoring measurable; use $m; set disabled yes; commit\")"
     check FAIL "$n: health ${m}${p:+:$p}" "${i:-bez opisu}$hint"
   done < <(health_fails "$n" | head -20)
 }
@@ -209,11 +209,11 @@ for h in $D_GPU_NODES; do
   if [ "${lt:-0}" -eq 0 ]; then
     check INFO "$h: NVLink" "brak linków w nvidia-smi nvlink -s (GPU PCIe bez NVLink lub sterownik nie raportuje)"
   elif [ "${li:-0}" -gt 0 ]; then
-    check WARN "$h: NVLink" "aktywne ${la:-0}/$lt, nieaktywne $li; GPU<->GPU przez NVLink: ${nt:-?}; NVSwitch w systemie: ${ns:-0} -> ./bcm-nvlink-fix.sh --node $h"
+    check WARN "$h: NVLink" "aktywne ${la:-0}/$lt, nieaktywne $li; GPU<->GPU przez NVLink: ${nt:-?}; NVSwitch w systemie: ${ns:-0}"
   else
     check PASS "$h: NVLink" "aktywne $la/$lt; GPU<->GPU przez NVLink: ${nt:-?}"
   fi
-  [ "${es:-0}" -gt 0 ] && check WARN "$h: liczniki błędów NVLink" "suma replay/recovery/CRC = $es (możliwy problem sprzętowy) -> ./bcm-nvlink-fix.sh --node $h"
+  [ "${es:-0}" -gt 0 ] && check WARN "$h: liczniki błędów NVLink" "suma replay/recovery/CRC = $es (możliwy problem sprzętowy: nvidia-bug-report.sh)"
   sw=$(awk -F'\t' -v h="$h" '$1==h{print $5}' "$WORKDIR/gpus.tsv")
   if [ "${sw:-0}" -gt 0 ]; then
     fm=$(nssh "$h" 'systemctl is-active nvidia-fabricmanager' 2>/dev/null)
