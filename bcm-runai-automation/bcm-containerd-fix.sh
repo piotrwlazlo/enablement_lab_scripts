@@ -153,7 +153,9 @@ kv ctr "$C"
 if [ -n "$C" ] && [ -S "$sock" ]; then
   v=$(timeout 10 "$C" --address "$sock" version 2>&1); kv ctr_rc $?
   kv srv_ver "$(awk '/Server:/{f=1} f && /Version:/{print $2; exit}' <<<"$v")"
-  kv cri "$(timeout 10 "$C" --address "$sock" plugins ls 2>/dev/null | awk '$2=="cri" || $1 ~ /\.cri\./ {printf "%s:%s ", $2, $NF}')"
+  pl=$(timeout 10 "$C" --address "$sock" plugins ls 2>/dev/null)
+  kv cri "$(awk '$2=="cri" || $1 ~ /\.cri\./ {printf "%s:%s ", $2, $NF}' <<<"$pl")"
+  kv snap_overlay "$(awk '$1 ~ /snapshotter/ && $2=="overlayfs" {print $NF}' <<<"$pl")"
 else kv ctr_rc none; fi
 if command -v crictl >/dev/null 2>&1 && [ -S "$sock" ]; then timeout 15 crictl --runtime-endpoint "unix://$sock" info >/dev/null 2>&1; kv crictl_rc $?; fi
 # pakiety
@@ -179,8 +181,20 @@ kv disk "$dk"
 q=$root; while [ ! -e "$q" ]; do q=$(dirname "$q"); done
 rfs=$(stat -f -c %T "$q" 2>/dev/null); kv root_fs "$rfs"
 [ "$rfs" = xfs ] && command -v xfs_info >/dev/null 2>&1 && kv root_ftype "$(xfs_info "$(df -P "$q" | awk 'NR==2{print $6}')" 2>/dev/null | grep -oE 'ftype=[01]')"
-mm=; for m in overlay br_netfilter; do [ -d "/sys/module/$m" ] || mm="$mm $m"; done
+mm=; for m in overlay br_netfilter; do [ -d "/sys/module/$m" ] || grep -qw "$m" /proc/filesystems 2>/dev/null || mm="$mm $m"; done
 kv mods_missing "$mm"
+k=$(uname -r); kv kernel "$k"
+[ -d "/lib/modules/$k" ] && kv kmod_dir yes || kv kmod_dir no
+kv kernels "$(ls /lib/modules 2>/dev/null | xargs)"
+kv ko_overlay "$(modinfo -n overlay 2>/dev/null)"
+kv ko_br_netfilter "$(modinfo -n br_netfilter 2>/dev/null)"
+kv mp_overlay "$(modprobe -n -v overlay 2>&1 | tail -1)"
+if command -v dpkg-query >/dev/null 2>&1; then
+  kv kmod_pkg "linux-modules-$k:$(dpkg-query -W -f='${Status}' "linux-modules-$k" 2>/dev/null | awk '{print $3}')"
+  kv kmod_cand "$(apt-cache policy "linux-modules-$k" 2>/dev/null | awk '/Candidate:/{print $2}')"
+else
+  kv kmod_pkg "$(rpm -q "kernel-modules-core-$k" "kernel-core-$k" 2>/dev/null | grep -v 'not installed' | head -1)"
+fi
 kv mem_avail_mb "$(free -m 2>/dev/null | awk '/^Mem:/{print $7}')"
 command -v getenforce >/dev/null 2>&1 && kv selinux "$(getenforce 2>/dev/null)"
 echo "@@CFGERR"; tail -n 8 "$cerr"; rm -f "$cerr"
@@ -236,6 +250,8 @@ wizard_sock() { [ -r "$K8S_SETUP_LOG" ] && grep -i 'containerd' "$K8S_SETUP_LOG"
 
 # ------------------------------------------------------------- werdykt -------
 declare -A VERDICT WHY SVC_CMD PROBE_CNT TRIED
+# CRI zgłoszony przez ctr i wszystkie jego pluginy "ok"
+cri_ok() { local c; c=$(pv "$1" cri | tr ' ' '\n' | grep .); [ -n "$c" ] && ! grep -qvE '^[^ ]+:ok$' <<<"$c"; }
 # Pliki wyłączające CRI, które containerd faktycznie czyta (config z ExecStart + jego imports)
 active_nocri() {
   local f c; c=" $(pv "$1" cfg) $(pv "$1" dropins) "
@@ -270,11 +286,17 @@ verdict() {
   elif [ -n "$dis" ]; then VERDICT[$n]=CONFIG_INVALID; WHY[$n]="disabled_plugins z \"cri\" w: $dis"
   elif [ -n "$full" ]; then VERDICT[$n]=DISK_FULL; WHY[$n]=$(echo "$full" | tr '\n' ';')
   elif [ "$(pv "$n" sock_exists)" != no ] && [ -z "$(pv "$n" lst_pid)" ] && [ "$act" != active ]; then VERDICT[$n]=STALE_SOCKET; WHY[$n]="$sock istnieje ($(pv "$n" sock_exists)), ale nikt na nim nie słucha"
-  elif [[ " $(pv "$n" mods_missing) " == *" overlay "* ]]; then VERDICT[$n]=KERNEL_MODULES; WHY[$n]="brak modułu jądra overlay (snapshotter overlayfs / CRI)"
+  elif [[ " $(pv "$n" mods_missing) " == *" overlay "* ]] && ! { [ "$(pv "$n" snap_overlay)" = ok ] && cri_ok "$n"; }; then
+    VERDICT[$n]=KERNEL_MODULES; WHY[$n]="moduł jądra overlay niezaładowany (kernel $(pv "$n" kernel)) - snapshotter overlayfs i CRI nie działają"
+    if [ "$(pv "$n" kmod_dir)" = no ]; then
+      WHY[$n]="${WHY[$n]}; BRAK /lib/modules/$(pv "$n" kernel): działający kernel nie ma modułów (kernel zaktualizowany bez rebootu albo usunięty pakiet modułów). Zainstalowane: $(pv "$n" kernels)"
+    elif [ -z "$(pv "$n" ko_overlay)" ]; then
+      WHY[$n]="${WHY[$n]}; pliku overlay.ko nie ma dla tego kernela (pakiet $(pv "$n" kmod_pkg)); modprobe: $(pv "$n" mp_overlay)"
+    else WHY[$n]="${WHY[$n]}; moduł jest ($(pv "$n" ko_overlay)) - wystarczy go załadować"; fi
   elif [ "${SVC_CMD[$n]}" = no ] && [ "$act" != active ]; then VERDICT[$n]=ROLE_MISSING; WHY[$n]="cmd nie ma usługi containerd dla $n (rola generic::containerd nieprzypisana) i usługa nie działa"
   elif [ "$(pv "$n" u_LoadState)" = masked ] || [ "$act" != active ] || [ "$(pv "$n" ctr_rc)" != 0 ]; then
     VERDICT[$n]=SERVICE_DOWN; WHY[$n]="unit $(pv "$n" u_LoadState)/$act/$(pv "$n" u_SubState), wynik $(pv "$n" u_Result), restartów $(pv "$n" u_NRestarts), socket $(pv "$n" sock_exists), ctr rc=$(pv "$n" ctr_rc)"
-  elif [ -z "$cri" ] || grep -qvE '^[^ ]+:ok$' <<<"$(tr ' ' '\n' <<<"$cri" | grep .)"; then VERDICT[$n]=CRI_BROKEN; WHY[$n]="pluginy CRI: ${cri:-brak w ctr plugins ls}"
+  elif ! cri_ok "$n"; then VERDICT[$n]=CRI_BROKEN; WHY[$n]="pluginy CRI: ${cri:-brak w ctr plugins ls}"
   else VERDICT[$n]=OK; WHY[$n]="containerd $(pv "$n" srv_ver) słucha na $sock, CRI: $cri"
   fi
   if [ "${VERDICT[$n]}" = OK ] && is_local "$n"; then
@@ -324,14 +346,15 @@ diagnose() {
   info "$n: ExecStart: $(pv "$n" exec)${W:+ -> wrapper: $W}"
   info "$n: binarka $(pv "$n" bin) (źródło: $(pv "$n" bin_src)) [$(pv "$n" bin_ver)], config $(pv "$n" cfg), drop-iny: $(pv "$n" dropins)"
   info "$n: socket $(pv "$n" sock) - $(pv "$n" sock_exists), nasłuch: pid=$(pv "$n" lst_pid) $(pv "$n" lst_exe); procesy containerd: $(pv "$n" procs)"
-  info "$n: ctr version rc=$(pv "$n" ctr_rc) serwer=$(pv "$n" srv_ver); CRI: $(pv "$n" cri); crictl rc=$(pv "$n" crictl_rc)"
+  info "$n: kernel $(pv "$n" kernel), /lib/modules: $(pv "$n" kmod_dir), overlay.ko: $(pv "$n" ko_overlay), brak modułów:$(pv "$n" mods_missing)"
+  info "$n: ctr version rc=$(pv "$n" ctr_rc) serwer=$(pv "$n" srv_ver); CRI: $(pv "$n" cri); snapshotter overlayfs: $(pv "$n" snap_overlay); crictl rc=$(pv "$n" crictl_rc)"
   info "$n: pakiety:$(pv "$n" pkgs); $(pv "$n" docker_state)"
   info "$n: usługa containerd w cmd (services): ${SVC_CMD[$n]}; dysk:$(pv "$n" disk); RAM wolne $(pv "$n" mem_avail_mb) MB"
   verdict "$n"
   local w
   [ -n "$(pv "$n" pkgs | grep -oE '(^| )(containerd|containerd\.io|docker\.io|docker-ce|moby-engine)=')" ] \
     && [ "${VERDICT[$n]}" != FOREIGN_RUNTIME ] && warn "$n: zainstalowane pakiety Dockera/containerd spoza BCM:$(pv "$n" pkgs) - mogą kolidować z cm-containerd"
-  [ -n "$(pv "$n" mods_missing)" ] && [ "${VERDICT[$n]}" != KERNEL_MODULES ] && warn "$n: brak modułów jądra:$(pv "$n" mods_missing) (Kubernetes wymaga br_netfilter)"
+  [ -n "$(pv "$n" mods_missing)" ] && [ "${VERDICT[$n]}" != KERNEL_MODULES ] && warn "$n: niezaładowane moduły jądra:$(pv "$n" mods_missing) (Kubernetes wymaga overlay i br_netfilter; overlay.ko: $(pv "$n" ko_overlay))"
   local rmb; rmb=$(pv "$n" disk | tr ' ' '\n' | awk -F: -v r="$(pv "$n" root)" '$1==r{print $3}')
   [ -n "$rmb" ] && [ "$rmb" -lt 10240 ] 2>/dev/null && warn "$n: pod $(pv "$n" root) tylko ${rmb} MB wolnego - obrazy K8s/Run:ai potrzebują kilkunastu GB"
   [ "$(pv "$n" root_fs)" = nfs ] && warn "$n: root containerd ($(pv "$n" root)) jest na NFS - overlayfs nie działa na NFS"
@@ -458,10 +481,31 @@ fix_STALE_SOCKET() {
 }
 
 fix_KERNEL_MODULES() {
-  local n=$1
+  local n=$1 k pkg cand; k=$(pv "$n" kernel)
+  if [ -z "$(pv "$n" ko_overlay)" ]; then
+    # Brak pliku modułu dla działającego kernela - przeinstaluj pakiet modułów albo reboot do zainstalowanego kernela
+    if ! is_local "$n"; then warn "$n: kernel i moduły węzła pochodzą z obrazu - sprawdź kernel obrazu (cmsh: softwareimage; use <obraz>; get kernelversion) i zrób reboot węzła"; return 1; fi
+    pkg=$(pv "$n" kmod_pkg); pkg=${pkg%%:*}; cand=$(pv "$n" kmod_cand)
+    if [ "$PKG" = dpkg ] && [ -n "$cand" ] && [ "$cand" != "(none)" ]; then
+      confirm "$n: zainstalować ponownie $pkg ($cand), żeby przywrócić moduły działającego kernela $k?" || return 1
+      echo "apt-get install -y --reinstall $pkg" | nexec "$n" "instalacja $pkg" || return 1
+    elif [ "$PKG" = rpm ]; then
+      confirm "$n: zainstalować ponownie moduły kernela $k (kernel-modules-core/kernel-core)?" || return 1
+      echo "dnf reinstall -y kernel-modules-core-$k 2>/dev/null || dnf reinstall -y kernel-core-$k" | nexec "$n" "reinstalacja modułów kernela" || return 1
+    else
+      err "$n: pakietu $pkg nie ma w repozytorium - modułów dla działającego kernela $k nie da się odtworzyć."
+      info "      Zainstalowane kernele (/lib/modules): $(pv "$n" kernels)"
+      info "      Rozwiązanie: reboot do zainstalowanego kernela (head node: zaplanuj okno, potem ./bcm-containerd-fix.sh --resume)"
+      return 1
+    fi
+  fi
   confirm "$n: załadować moduły overlay i br_netfilter (na stałe w /etc/modules-load.d/k8s.conf)?" || return 1
-  cat <<'EOF' | nexec "$n" "modprobe overlay br_netfilter"
-for m in overlay br_netfilter; do modprobe "$m" && { grep -qx "$m" /etc/modules-load.d/k8s.conf 2>/dev/null || echo "$m" >>/etc/modules-load.d/k8s.conf; }; done
+  cat <<'EOF' | nexec "$n" "modprobe overlay br_netfilter" || { err "$n: modprobe overlay nie zadziałał (zob. log powyżej)"; return 1; }
+for m in overlay br_netfilter; do
+  modprobe -v "$m" || { echo "modprobe $m: błąd"; continue; }
+  grep -qx "$m" /etc/modules-load.d/k8s.conf 2>/dev/null || echo "$m" >>/etc/modules-load.d/k8s.conf
+done
+[ -d /sys/module/overlay ] || grep -qw overlay /proc/filesystems
 EOF
   is_local "$n" || warn "$n: na węźle z obrazu ustaw moduły w obrazie/kategorii BCM (kernel modules), inaczej znikną po reprowizji"
 }
