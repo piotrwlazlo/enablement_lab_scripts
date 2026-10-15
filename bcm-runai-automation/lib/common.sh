@@ -72,6 +72,8 @@ cidr_overlap() {
   local mask=$(( m == 0 ? 0 : (0xFFFFFFFF << (32-m)) & 0xFFFFFFFF ))
   [ $(( $(ip2int "$a") & mask )) -eq $(( $(ip2int "$b") & mask )) ]
 }
+# Sieć "wszystko" (globalnet BCM 0.0.0.0/0, trasa default) - pomijana przy kolizjach CIDR
+is_default_net() { case $1 in */0|0.0.0.0/*|default) return 0;; esac; return 1; }
 
 # ------------------------------------------------------------ dystrybucja ----
 detect_os() {
@@ -213,6 +215,64 @@ gpu_probe() {
        echo "$c|$m|$d|$s|$l"'
   if [ "$n" = "$(hostname -s)" ] || [ "$n" = "$(hostname)" ]; then bash -c "$cmd"; else nssh "$n" "$cmd" 2>/dev/null; fi
 }
+
+# nrun <węzeł>  (skrypt bash na stdin) - lokalnie na head node albo przez ssh na węźle
+nrun() {
+  local n=$1
+  if [ "$n" = "$(hostname -s)" ] || [ "$n" = "$(hostname)" ]; then tmo 180 bash -s
+  else tmo 180 ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$n" 'bash -s'; fi
+}
+
+# kv_get <klucz> <tekst "klucz=wartość" w liniach>
+kv_get() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
+
+# CPU i RAM węzła: "rdzenie RAM_GB"
+node_res() {
+  nrun "$1" 2>/dev/null <<'EOS'
+echo "$(nproc) $(awk '/MemTotal/{printf "%d", $2/1048576+0.5}' /proc/meminfo)"
+EOS
+}
+
+# Health checki BCM w stanie FAIL: linie "measurable|parametr|info"
+health_fails() {
+  cmsh_q "device; use $1; latesthealthdata" | awk '
+    { for (i=2;i<=NF;i++) if ($i=="FAIL") {
+        p = (i>=4) ? $2 : ""
+        j = i+1; while (j<=NF && $j ~ /^[0-9]+[smhdw]$/) j++   # pomiń wiek próbki, np. "1m 21s"
+        info=""; for (; j<=NF; j++) info = info (info=="" ? "" : " ") $j
+        print $1 "|" p "|" info; break } }'
+}
+
+# Sonda GPU/NVLink na węźle: linie klucz=wartość
+#   virt vmode pci_gpus nvswitch smi_gpus drv link_total link_active link_inactive nv_topo err_sum fm_state fm_ver
+_gpu_link_probe_script() {
+  cat <<'EOS'
+v=$(systemd-detect-virt 2>/dev/null); echo "virt=${v:-unknown}"
+g=0; s=0
+if command -v lspci >/dev/null 2>&1; then
+  g=$(lspci -nd 10de: 2>/dev/null | grep -Ec ' 030[02]: ')
+  s=$(lspci -nd 10de: 2>/dev/null | grep -c ' 0680: ')
+fi
+echo "pci_gpus=$g"; echo "nvswitch=$s"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  echo "smi_gpus=$(nvidia-smi -L 2>/dev/null | grep -c '^GPU ')"
+  echo "drv=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')"
+  echo "vmode=$(nvidia-smi -q 2>/dev/null | awk -F: '/Virtualization Mode *:/{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2; exit}')"
+  st=$(nvidia-smi nvlink -s 2>/dev/null)
+  echo "link_total=$(grep -Ec 'Link [0-9]+:' <<<"$st")"
+  echo "link_inactive=$(grep -Eic 'Link [0-9]+:.*inactive' <<<"$st")"
+  echo "link_active=$(grep -Ec 'Link [0-9]+:.*GB/s' <<<"$st")"
+  if nvidia-smi topo -m 2>/dev/null | awk '/^GPU[0-9]/{for(i=2;i<=NF;i++) if($i ~ /^NV[0-9]+$/) f=1} END{exit !f}'; then
+    echo nv_topo=yes; else echo nv_topo=no; fi
+  echo "err_sum=$(nvidia-smi nvlink -e 2>/dev/null | grep -Eio '(replay|recovery|crc)[^:]*errors?[^:]*: *[0-9]+' | grep -Eo '[0-9]+$' | awk '{s+=$1} END{print s+0}')"
+fi
+echo "fm_state=$(systemctl is-active nvidia-fabricmanager 2>/dev/null)"
+fm=$(dpkg-query -W -f='${Version}\n' 'nvidia-fabricmanager*' 2>/dev/null | grep . | head -1)
+[ -n "$fm" ] || fm=$(rpm -qa --qf '%{VERSION}\n' 'nvidia-fabric*manager*' 2>/dev/null | head -1)
+echo "fm_ver=$fm"
+EOS
+}
+gpu_link_probe() { _gpu_link_probe_script | nrun "$1" 2>/dev/null; }
 
 # ------------------------------------------------------------------ sieci ----
 # network_info <nazwa> -> ustawia NET_BASE NET_BITS NET_DYN_S NET_DYN_E NET_GW NET_DOMAIN
@@ -437,6 +497,14 @@ discover_all() {
   done
   D_CATEGORY_EXTRA=$(xargs <<<"$D_CATEGORY_EXTRA")
 
+  # CPU/RAM aktywnego head node i workerów: "host:rdzenie/RAM_GB"
+  D_NODE_RES=
+  for h in $(printf '%s\n' "$D_ACTIVE_HEAD" $D_WORKERS | awk 'NF && !s[$0]++'); do
+    read -r c m <<<"$(node_res "$h")"
+    [ -n "$c" ] && D_NODE_RES="$D_NODE_RES $h:$c/${m:-0}"
+  done
+  D_NODE_RES=$(xargs <<<"$D_NODE_RES")
+
   # Sieć węzłów (z niej idą adresy MetalLB L2)
   D_NODE_NET=${LB_NETWORK:-$(awk -F'\t' -v h="${w1:-$D_ACTIVE_HEAD}" '$2==h{print $6}' "$WORKDIR/devices.tsv")}
   [ -z "$D_NODE_NET" ] && D_NODE_NET=internalnet
@@ -488,8 +556,8 @@ pick_free_cidr() {
   local c n hit
   for c in "$@"; do
     hit=0
-    while read -r _ n _; do [ -n "$n" ] && cidr_overlap "$c" "$n" && hit=1; done <"$WORKDIR/networks.txt"
-    while read -r n; do [ -n "$n" ] && cidr_overlap "$c" "$n" && hit=1; done <"$WORKDIR/networks.txt.routes"
+    while read -r _ n _; do [ -n "$n" ] && ! is_default_net "$n" && cidr_overlap "$c" "$n" && hit=1; done <"$WORKDIR/networks.txt"
+    while read -r n; do [ -n "$n" ] && ! is_default_net "$n" && cidr_overlap "$c" "$n" && hit=1; done <"$WORKDIR/networks.txt.routes"
     [ $hit = 0 ] && { echo "$c"; return; }
   done
   echo "$1"
@@ -500,7 +568,7 @@ write_discovered_env() {
     echo "# Wygenerowane przez $(basename "$0") $(date -Is) na $(hostname)"
     for v in BCM_RELEASE BCM_SRC BCM_FLOW OS_ID OS_VER OS_FAMILY \
              D_HEAD_NODES D_ACTIVE_HEAD D_HA D_HEAD_IP D_GPU_NODES D_GPU_COUNTS D_GPU_TOTAL D_GPU_MODELS D_DRIVERS \
-             D_NVSWITCH D_DRIVER_FROM_IMAGE D_CPU_NODES D_DOWN_NODES D_WORKERS D_WORKER_CATEGORIES D_CATEGORY_EXTRA \
+             D_NVSWITCH D_DRIVER_FROM_IMAGE D_CPU_NODES D_DOWN_NODES D_WORKERS D_WORKER_CATEGORIES D_CATEGORY_EXTRA D_NODE_RES \
              D_NODE_NET D_NET_CIDR D_NET_GW D_NET_DOMAIN D_NET_DYN D_CLIENT_IP D_CLIENT_IN_NET \
              D_LB_NEED D_LB_IPS D_SVC_CIDR D_POD_CIDR D_K8S_CLUSTERS D_K8S_VERSIONS D_K8S_VERSION \
              D_DOMAIN D_RUNAI_FQDN D_INFERENCE_WILDCARD; do

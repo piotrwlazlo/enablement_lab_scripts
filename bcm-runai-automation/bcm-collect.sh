@@ -99,6 +99,14 @@ fi
 kpk=$(pkg_list '(^|-)kube(rnetes|adm|let|ctl)' | xargs)
 check INFO "Zainstalowane pakiety Kubernetes" "${kpk:-brak}"
 check INFO "Wersje K8s w kreatorze" "${D_K8S_VERSIONS:-nie odczytano} -> proponowana: $D_K8S_VERSION"
+# Wersje operatorów w kreatorze (Run:ai wymaga m.in. Knative 1.19-1.21, LWS >= 0.7, kube-prometheus-stack)
+if have cm-kubernetes-setup && tmo 60 cm-kubernetes-setup --help 2>&1 | grep -q -- '--list-operators-versions'; then
+  raw k8s-operators-versions.txt cm-kubernetes-setup --list-operators-versions
+  for p in 'knative' 'lws|leader' 'postgres' 'prometheus'; do
+    l=$(grep -Ei "$p" "$RAW/k8s-operators-versions.txt" | grep -v '^###' | sed 's/  */ /g; s/^ //' | head -3 | paste -sd ';' | cut -c1-200)
+    [ -n "$l" ] && check INFO "Operator w kreatorze: ${p%%|*}" "$l"
+  done
+fi
 
 # ======================================================= 2. Head node(s) ====
 hdr "2. Head node(s)"
@@ -113,6 +121,18 @@ free_sh=$(df -BG --output=avail /cm/shared 2>/dev/null | tail -1 | tr -dc 0-9)
 [ "${free_sh:-0}" -ge 100 ] && check PASS "Miejsce /cm/shared (local-path PVC)" "${free_sh}G" || check WARN "Miejsce /cm/shared (local-path PVC)" "${free_sh:-?}G (zalecane >= 100G)"
 mem=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
 check INFO "RAM head node" "${mem}G"
+
+# Health checki BCM w stanie FAIL ("health check failed" w device status)
+health_report() {
+  local n=$1 m p i hint
+  rawsh "health-$n.txt" "cmsh -c 'device; use $n; latesthealthdata'"
+  while IFS='|' read -r m p i; do
+    [ -n "$m" ] || continue
+    hint=; grep -qiE 'nvlink|link' <<<"$m $i" && hint=" -> diagnoza/naprawa: ./bcm-nvlink-fix.sh --node $n"
+    check FAIL "$n: health ${m}${p:+:$p}" "${i:-bez opisu}$hint"
+  done < <(health_fails "$n" | head -20)
+}
+for h in $D_ACTIVE_HEAD; do health_report "$h"; done
 
 # ============================================================= 3. Węzły =====
 hdr "3. Węzły i GPU"
@@ -130,6 +150,17 @@ if [ -n "$D_GPU_NODES" ]; then
   check PASS "Węzły GPU (UP)" "$D_GPU_COUNTS (razem $D_GPU_TOTAL GPU)"
 else
   check FAIL "Węzły GPU (UP)" "nie znaleziono żadnego działającego węzła z GPU"
+fi
+# Zasoby: Run:ai cluster (system nodes 10 CPU / 20 GB) + control plane (10 CPU / 12 GB) na jednym K8s
+res_ok=0
+for r in $D_NODE_RES; do
+  c=${r#*:}; m=${c#*/}; c=${c%/*}
+  check INFO "Zasoby ${r%%:*}" "$c CPU, $m GB RAM"
+  [ "${c:-0}" -ge 20 ] && [ "${m:-0}" -ge 32 ] && res_ok=1
+done
+if [ -n "$D_NODE_RES" ]; then
+  [ $res_ok = 1 ] && check PASS "Zasoby dla Run:ai (control plane + cluster)" "co najmniej jeden węzeł ma >= 20 CPU / 32 GB" \
+                  || check WARN "Zasoby dla Run:ai (control plane + cluster)" "żaden węzeł nie ma >= 20 CPU / 32 GB (Run:ai cluster 10/20G + control plane 10/12G) - zwiększ zasoby (VM?) albo dodaj węzły"
 fi
 [ -n "$D_GPU_MODELS" ] && check INFO "Modele GPU" "$D_GPU_MODELS"
 [ -n "$D_DRIVERS" ] && check INFO "Sterownik NVIDIA" "$D_DRIVERS"
@@ -162,7 +193,27 @@ for h in $D_GPU_NODES; do
   [ "$td" -le 2 ] && check PASS "$h: zegar" "różnica ${td}s" || check WARN "$h: zegar" "różnica ${td}s względem head node (NTP!)"
   if [ "$QUICK" = 0 ]; then
     rawsh "node-$h-nvidia.txt" "ssh -o BatchMode=yes $h 'nvidia-smi; cat /proc/driver/nvidia/version; nvidia-smi -q | grep -A3 -i \"^ *Fabric\"' "
+    rawsh "node-$h-nvlink.txt" "ssh -o BatchMode=yes $h 'systemd-detect-virt; nvidia-smi -q | grep -i \"Virtualization Mode\"; lspci -nd 10de:; nvidia-smi topo -m; nvidia-smi nvlink -s; nvidia-smi nvlink -e' "
   fi
+  health_report "$h"
+  # Wirtualizacja i NVLink
+  lp=$(gpu_link_probe "$h")
+  virt=$(kv_get virt "$lp"); vmode=$(kv_get vmode "$lp")
+  check INFO "$h: wirtualizacja" "${virt:-?}${vmode:+ (GPU: $vmode)}"
+  case $vmode in
+    *[Vv][Gg][Pp][Uu]*) check FAIL "$h: tryb GPU" "$vmode - Run:ai nie wspiera vGPU (tylko passthrough / bare metal)";;
+    *[Pp]ass*) check PASS "$h: tryb GPU" "$vmode (passthrough - wspierane przez Run:ai)";;
+  esac
+  lt=$(kv_get link_total "$lp"); la=$(kv_get link_active "$lp"); li=$(kv_get link_inactive "$lp")
+  nt=$(kv_get nv_topo "$lp"); es=$(kv_get err_sum "$lp"); ns=$(kv_get nvswitch "$lp")
+  if [ "${lt:-0}" -eq 0 ]; then
+    check INFO "$h: NVLink" "brak linków w nvidia-smi nvlink -s (GPU PCIe bez NVLink lub sterownik nie raportuje)"
+  elif [ "${li:-0}" -gt 0 ]; then
+    check WARN "$h: NVLink" "aktywne ${la:-0}/$lt, nieaktywne $li; GPU<->GPU przez NVLink: ${nt:-?}; NVSwitch w systemie: ${ns:-0} -> ./bcm-nvlink-fix.sh --node $h"
+  else
+    check PASS "$h: NVLink" "aktywne $la/$lt; GPU<->GPU przez NVLink: ${nt:-?}"
+  fi
+  [ "${es:-0}" -gt 0 ] && check WARN "$h: liczniki błędów NVLink" "suma replay/recovery/CRC = $es (możliwy problem sprzętowy) -> ./bcm-nvlink-fix.sh --node $h"
   sw=$(awk -F'\t' -v h="$h" '$1==h{print $5}' "$WORKDIR/gpus.tsv")
   if [ "${sw:-0}" -gt 0 ]; then
     fm=$(nssh "$h" 'systemctl is-active nvidia-fabricmanager' 2>/dev/null)
@@ -215,6 +266,7 @@ fi
 check INFO "Wolne IP - potwierdzenie" "zapytaj zespół sieciowy, czy $D_LB_IPS nie są używane poza BCM (switche, iDRAC/BMC)"
 check INFO "Proponowane CIDR K8s" "service $D_SVC_CIDR, pod $D_POD_CIDR (bez kolizji z sieciami BCM i trasami)"
 for n in $(awk '{print $2}' "$WORKDIR/networks.txt"); do
+  is_default_net "$n" && continue   # globalnet 0.0.0.0/0 obejmuje wszystko - to nie kolizja
   for c in $D_SVC_CIDR $D_POD_CIDR; do cidr_overlap "$c" "$n" && check FAIL "Kolizja CIDR" "$c z $n"; done
 done
 mtus=$(ip -o link | awk '{for(i=1;i<=NF;i++) if($i=="mtu") print $(i+1)}' | sort -u | xargs)
