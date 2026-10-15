@@ -31,6 +31,9 @@
 #                    "all containerd services are active")       -> --fix: restart przez cmd
 #   NODE_DOWN        węzeł z rolą containerd nie jest UP w BCM    -> włącz/napraw węzeł
 #   SOCKET_MISMATCH  kreator czeka na inny socket niż ten, na którym słucha containerd
+#   WIZARD_CRICTL    containerd działa, ale test kreatora ("crictl -r <socket> info" uruchamiany
+#                    przez cmd) nic nie zwraca -> "Containerd socket on <węzeł> not ready"
+#                    (np. crictl poza PATH cmd)                   -> --fix: link crictl do PATH cmd
 #   OK               containerd i CRI działają (był timeout)        -> --resume
 #
 # Wynik: /root/bcm-containerd-fix-<data>/report.txt (+ raw/), log obok.
@@ -70,6 +73,21 @@ LOG_FILE=$WORKDIR.log; REPORT=$WORKDIR/report.txt
 export WORKDIR LOG_FILE REPORT
 info "Log: $LOG_FILE"
 
+# Socket, który testuje kreator: consts.CONTAINER_RUNTIME_ENDPOINTS["containerd"] z kodu cm-setup
+KUBE_PLUGIN=$(ls -d /cm/local/apps/cm-setup/lib/python3*/site-packages/cmsetup/plugins/kubernetes 2>/dev/null | tail -1)
+wizard_ep() {
+  [ -n "$KUBE_PLUGIN" ] || return
+  local v nm
+  v=$(grep -rh -A10 --include='*.py' -E 'CONTAINER_RUNTIME_ENDPOINTS[^=]*=' "$KUBE_PLUGIN" 2>/dev/null \
+      | grep -oE "[\"']containerd[\"'][[:space:]]*:[[:space:]]*[^,}]+" | head -1 | sed -E "s/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//")
+  case $v in
+    *unix://*) grep -oE "unix://[^\"']+" <<<"$v";;
+    [A-Za-z_]*) nm=${v##*.}            # odwołanie do innej stałej
+       grep -rh --include='*.py' -E "^[[:space:]]*${nm}[[:space:]]*(:[^=]*)?=" "$KUBE_PLUGIN/.." 2>/dev/null | grep -oE "unix://[^\"']+" | head -1;;
+  esac
+}
+WIZ_EP=$(wizard_ep); WIZ_EP=${WIZ_EP:-unix:///run/containerd/containerd.sock}
+
 HEAD=$(hostname -s)
 is_local() { [ "$1" = "$HEAD" ] || [ "$1" = "$(hostname)" ]; }
 # Kreator czeka na containerd na WSZYSTKICH węzłach z rolą generic::containerd - bez --node
@@ -89,7 +107,7 @@ NODES=$(echo "$NODES" | xargs -n1 | awk '!s[$0]++' | xargs)
 # --------------------------------------------------------------- sonda -------
 # Wynik: linie klucz=wartość, potem sekcje @@CFGERR, @@STATUS, @@JOURNAL.
 _ctd_probe_script() {
-  echo "B=$BCM_CTD"
+  echo "B=$BCM_CTD"; printf 'WIZ_EP=%q\n' "$WIZ_EP"
   cat <<'PROBE'
 export LC_ALL=C PATH=$PATH:/usr/sbin:/sbin
 kv() { printf '%s=%s\n' "$1" "$(printf '%s' "$2" | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"; }
@@ -174,6 +192,19 @@ if [ -n "$C" ] && [ -S "$sock" ]; then
   kv snap_overlay "$(awk '$1 ~ /snapshotter/ && $2=="overlayfs" {print $NF}' <<<"$pl")"
 else kv ctr_rc none; fi
 if command -v crictl >/dev/null 2>&1 && [ -S "$sock" ]; then timeout 15 crictl --runtime-endpoint "unix://$sock" info >/dev/null 2>&1; kv crictl_rc $?; fi
+# test kreatora: "crictl -r <EP> info" uruchamiany przez cmd - czyli z PATH procesu cmd, bez profilu powłoki
+kv crictl_sh "$(command -v crictl)"
+kv crictl_found "$(ls -1 /usr/local/bin/crictl /usr/bin/crictl /usr/sbin/crictl "$B"/current/bin/crictl /cm/local/apps/kubernetes/*/bin/crictl /cm/local/apps/*/current/bin/crictl 2>/dev/null | awk '!s[$0]++' | xargs)"
+cpid=$(pgrep -xo cmd 2>/dev/null); cpath=
+[ -n "$cpid" ] && cpath=$(tr '\0' '\n' <"/proc/$cpid/environ" 2>/dev/null | sed -n 's/^PATH=//p')
+kv cmd_pid "$cpid"; kv cmd_path "$cpath"
+cpath=${cpath:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
+kv crictl_cmdenv "$(env -i PATH="$cpath" sh -c 'command -v crictl' 2>/dev/null)"
+ep=${WIZ_EP:-unix:///run/containerd/containerd.sock}; kv wz_ep "$ep"
+wo=$(mktemp); we=$(mktemp)
+env -i PATH="$cpath" HOME=/root timeout 30 sh -c 'crictl -r "$1" info' sh "$ep" >"$wo" 2>"$we"; kv wz_rc $?
+kv wz_bytes "$(wc -c <"$wo" | tr -d ' ')"
+kv wz_runtime_ready "$(tr -d ' \n\t' <"$wo" | grep -oE '"type":"RuntimeReady","status":(true|false)' | grep -oE 'true|false' | head -1)"
 # pakiety
 pk=
 for p in cm-containerd containerd containerd.io docker.io docker-ce docker-ce-cli moby-engine moby-containerd podman-docker runc; do
@@ -214,6 +245,7 @@ fi
 kv mem_avail_mb "$(free -m 2>/dev/null | awk '/^Mem:/{print $7}')"
 command -v getenforce >/dev/null 2>&1 && kv selinux "$(getenforce 2>/dev/null)"
 echo "@@CFGERR"; tail -n 8 "$cerr"; rm -f "$cerr"
+echo "@@WIZERR"; tail -n 6 "$we"; rm -f "$wo" "$we"
 echo "@@STATUS"; systemctl status containerd --no-pager -l 2>&1 | head -25
 echo "@@JOURNAL"; journalctl -u containerd -b --no-pager -n 150 -o short-iso 2>&1
 PROBE
@@ -274,6 +306,64 @@ managed_files() {
 # Ścieżka socketu, na który czeka kreator (z jego logu)
 wizard_sock() { [ -r "$K8S_SETUP_LOG" ] && grep -i 'containerd' "$K8S_SETUP_LOG" | grep -oE '(unix://)?/[^ "'\'',)]+\.sock' | sed 's|^unix://||' | tail -1; }
 
+# Python kreatora (z pythoncm) - do odtworzenia jego testu przez cmd: cluster.parallel.execute()
+WIZ_PY=; WIZ_PP=
+wiz_python() {
+  local s c v pp; s=$(command -v cm-kubernetes-setup 2>/dev/null)
+  for c in $(head -1 "$s" 2>/dev/null | grep -oE '/[^ ]*python[0-9.]*') \
+           $(grep -oE '/[^ "'\'']*bin/python3[0-9.]*' "$s" 2>/dev/null | awk '!x[$0]++') \
+           /cm/local/apps/cm-setup/bin/python3 /cm/local/apps/python3/bin/python3 /cm/local/apps/python3*/bin/python3; do
+    [ -x "$c" ] || continue
+    "$c" -c 'import pythoncm.cluster' 2>/dev/null && { WIZ_PY=$c; return 0; }
+    v=$("$c" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+    pp=$(ls -d /cm/local/apps/cm-setup/lib/python"$v"/site-packages /cm/local/apps/cmd/pythoncm/lib/python"$v"/site-packages 2>/dev/null | paste -sd:)
+    [ -n "$pp" ] && PYTHONPATH=$pp "$c" -c 'import pythoncm.cluster' 2>/dev/null && { WIZ_PY=$c; WIZ_PP=$pp; return 0; }
+  done
+  return 1
+}
+# cmd_exec <węzeł> <plik_wyjścia> <komenda> -> "OK <bajty>" | "ERR <opis>"  (tylko odczyt: wykonuje komendę przez cmd)
+cmd_exec() {
+  if [ -n "${CTD_PROBE_DIR:-}" ]; then   # testy
+    [ -r "$CTD_PROBE_DIR/cmdexec-$1.txt" ] && { cp "$CTD_PROBE_DIR/cmdexec-$1.txt" "$2"; echo "OK $(wc -c <"$2" | tr -d ' ')"; } || echo "ERR brak atrapy"; return
+  fi
+  [ -n "$WIZ_PY" ] || wiz_python || { echo "ERR nie znaleziono pythona z pythoncm (cm-setup)"; return; }
+  tmo 150 "$WIZ_PY" -I - "$1" "$2" "$3" "$WIZ_PP" <<'PY' 2>&1 | tail -1
+import sys
+host, out, cmd, pp = sys.argv[1:5]
+sys.path[:0] = [p for p in pp.split(":") if p]
+try:
+    import pythoncm.cluster, pythoncm.entity
+    c = pythoncm.cluster.Cluster()
+    nodes = [n for n in c.get_by_type(pythoncm.entity.Node) if n.hostname == host]
+    if not nodes:
+        print("ERR węzeł %s nie znaleziony w pythoncm" % host); sys.exit(0)
+    _, st = c.parallel.execute(nodes, cmd, wait=True, timeout=60)
+    o = st.get_output(nodes[0].uuid) or ""
+    open(out, "w").write(o)
+    print("OK %d" % len(o))
+except Exception as e:
+    print("ERR %s: %s" % (type(e).__name__, str(e).replace("\n", " ")[:300]))
+PY
+}
+# Test kreatora przez cmd (dokładnie jak stages.py: _wait_for_containerd_runtime_status_ready)
+declare -A WZX WZX_ENV
+wizard_exec_test() {
+  local n=$1 f=$WORKDIR/raw/wizard-crictl-$1.txt
+  WZX[$n]=$(cmd_exec "$n" "$f" "crictl -r $WIZ_EP info")
+  [ -n "${CTD_PROBE_DIR:-}" ] || WZX_ENV[$n]=$(cmd_exec "$n" "$WORKDIR/raw/cmd-env-$n.txt" "env" >/dev/null; sed -n 's/^PATH=//p' "$WORKDIR/raw/cmd-env-$n.txt" 2>/dev/null)
+}
+wiz_why() {
+  local n=$1 found env x
+  found=$(pv "$n" crictl_found); env=$(pv "$n" crictl_cmdenv); x=${WZX[$n]:-}
+  if [ -z "$found" ] && [ -z "$(pv "$n" crictl_sh)" ]; then
+    echo "na $n nie ma crictl - kreator testuje socket przez cmd komendą 'crictl -r $WIZ_EP info'"
+  elif [ -z "$env" ]; then
+    echo "crictl jest (${found:-$(pv "$n" crictl_sh)}), ale nie w PATH procesu cmd (${WZX_ENV[$n]:-$(pv "$n" cmd_path)}) - kreator wywołuje 'crictl' bez ścieżki przez cmd"
+  else
+    echo "'crictl -r $WIZ_EP info' z PATH cmd: rc=$(pv "$n" wz_rc), wyjście $(pv "$n" wz_bytes) B, RuntimeReady=$(pv "$n" wz_runtime_ready); przez cmd: ${x:-nie testowano}; stderr: $(psec "$n" WIZERR | grep -v '^$' | tail -2 | tr '\n' ' ')"
+  fi
+}
+
 # ------------------------------------------------------------- werdykt -------
 declare -A VERDICT WHY SVC_CMD SVC_STAT PROBE_CNT TRIED
 # CRI zgłoszony przez ctr i wszystkie jego pluginy "ok"
@@ -324,6 +414,16 @@ verdict() {
     VERDICT[$n]=SERVICE_DOWN; WHY[$n]="unit $(pv "$n" u_LoadState)/$act/$(pv "$n" u_SubState), wynik $(pv "$n" u_Result), restartów $(pv "$n" u_NRestarts), socket $(pv "$n" sock_exists), ctr rc=$(pv "$n" ctr_rc)"
   elif ! cri_ok "$n"; then VERDICT[$n]=CRI_BROKEN; WHY[$n]="pluginy CRI: ${cri:-brak w ctr plugins ls}"
   else VERDICT[$n]=OK; WHY[$n]="containerd $(pv "$n" srv_ver) słucha na $sock, CRI: $cri"
+  fi
+  # kreator: "Containerd socket on <węzeł> not ready." = puste wyjście crictl info uruchomionego przez cmd
+  if [ "${VERDICT[$n]}" = OK ]; then
+    local x=${WZX[$n]:-} wb; wb=$(pv "$n" wz_bytes)
+    if [[ $x == "OK 0" ]] || { [[ $x != OK* ]] && [ "${wb:-0}" = 0 ]; }; then
+      VERDICT[$n]=WIZARD_CRICTL; WHY[$n]=$(wiz_why "$n")
+      [[ $x == "OK 0" ]] && [ "${wb:-0}" != 0 ] && WHY[$n]="'crictl -r $WIZ_EP info' działa z powłoki z PATH cmd, ale uruchomiony przez cmd zwraca pusty wynik (PATH cmd przy execute: ${WZX_ENV[$n]:-?}; zob. /var/log/cmdaemon)"
+    elif [ "$(pv "$n" wz_runtime_ready)" = false ] || { [[ $x == OK* ]] && grep -qE '"type": *"RuntimeReady", *"status": *false' "$WORKDIR/raw/wizard-crictl-$n.txt" 2>/dev/null; }; then
+      VERDICT[$n]=WIZARD_CRICTL; WHY[$n]="crictl info: RuntimeReady=false (kreator: 'does not report runtime is ready') - zob. raw/wizard-crictl-$n.txt i journal"
+    fi
   fi
   if [ "${VERDICT[$n]}" = OK ] && [ "${SVC_CMD[$n]}" = yes ] && [ "${SVC_STAT[$n]:-?}" != UP ]; then
     VERDICT[$n]=CMD_NOT_UP; WHY[$n]="systemd: containerd działa, ale cmd pokazuje usługę jako '${SVC_STAT[$n]:-brak statusu}' - kreator czeka na UP w cmd"
@@ -376,12 +476,15 @@ diagnose() {
   fi
   if ! probe "$n"; then VERDICT[$n]=UNREACHABLE; WHY[$n]="sonda nie zadziałała: $(tail -2 "$(probe_file "$n")" | tr '\n' ' ')"; check FAIL "$n: sonda" "${WHY[$n]}"; return; fi
   bcm_side "$n"; W=$(pv "$n" wrapper)
+  wizard_exec_test "$n"
   info "$n: unit $(pv "$n" u_FragmentPath) (pakiet: $(pv "$n" unit_owner)), stan $(pv "$n" u_LoadState)/$(pv "$n" u_ActiveState)/$(pv "$n" u_SubState), restartów $(pv "$n" u_NRestarts)"
   info "$n: ExecStart: $(pv "$n" exec)${W:+ -> wrapper: $W}"
   info "$n: binarka $(pv "$n" bin) (źródło: $(pv "$n" bin_src)) [$(pv "$n" bin_ver)], config $(pv "$n" cfg), drop-iny: $(pv "$n" dropins)"
   info "$n: socket $(pv "$n" sock) - $(pv "$n" sock_exists), nasłuch: pid=$(pv "$n" lst_pid) $(pv "$n" lst_exe); procesy containerd: $(pv "$n" procs)"
   info "$n: kernel $(pv "$n" kernel), /lib/modules: $(pv "$n" kmod_dir), overlay.ko: $(pv "$n" ko_overlay), brak modułów:$(pv "$n" mods_missing)"
   info "$n: ctr version rc=$(pv "$n" ctr_rc) serwer=$(pv "$n" srv_ver); CRI: $(pv "$n" cri); snapshotter overlayfs: $(pv "$n" snap_overlay); crictl rc=$(pv "$n" crictl_rc)"
+  info "$n: test kreatora 'crictl -r $(pv "$n" wz_ep) info': crictl w powłoce: $(pv "$n" crictl_sh), w PATH cmd: $(pv "$n" crictl_cmdenv), znalezione: $(pv "$n" crictl_found)"
+  info "$n:   z PATH cmd: rc=$(pv "$n" wz_rc), wyjście $(pv "$n" wz_bytes) B, RuntimeReady=$(pv "$n" wz_runtime_ready); przez cmd (pythoncm): ${WZX[$n]:-?}"
   info "$n: pakiety:$(pv "$n" pkgs); $(pv "$n" docker_state)"
   info "$n: usługa containerd w cmd: ${SVC_CMD[$n]}, stan w cmd: ${SVC_STAT[$n]:-?}; dysk:$(pv "$n" disk); RAM wolne $(pv "$n" mem_avail_mb) MB"
   verdict "$n"
@@ -560,6 +663,19 @@ fix_SERVICE_DOWN() {
 fix_CRI_BROKEN() { confirm "$1: zrestartować containerd (CRI nie wstał)?"; }
 
 fix_CMD_NOT_UP() { confirm "$1: zrestartować containerd przez cmd, żeby odświeżyć stan usługi (${SVC_STAT[$1]:-?})?"; }
+fix_WIZARD_CRICTL() {
+  local n=$1 src d cp
+  src=$(pv "$n" crictl_found | awk '{print $1}'); [ -n "$src" ] || src=$(pv "$n" crictl_sh)
+  if [ -n "$(pv "$n" crictl_cmdenv)" ] || [ -z "$src" ]; then
+    warn "$n: brak automatu - crictl ${src:+jest w PATH cmd, }${src:-nie istnieje} (zob. raw/probe-$n.txt @@WIZERR i raw/wizard-crictl-$n.txt)"; return 1
+  fi
+  cp=${WZX_ENV[$n]:-$(pv "$n" cmd_path)}
+  for d in /usr/local/bin /usr/bin /usr/local/sbin /usr/sbin; do [[ :$cp: == *:$d:* ]] && break; d=; done
+  d=${d:-/usr/bin}
+  confirm "$n: utworzyć link $d/crictl -> $src (katalog z PATH cmd)?" || return 1
+  printf '[ -e %q ] || ln -s %q %q\n' "$d/crictl" "$src" "$d/crictl" | nexec "$n" "link crictl" || return 1
+  is_local "$n" || warn "$n: link zniknie po reinstalacji węzła z obrazu - dodaj go też w obrazie (cm-chroot-sw-img)"
+}
 fix_NODE_DOWN() { warn "$1: włącz/napraw węzeł (cmsh -c \"device; status $1\", konsola/BMC) albo usuń go z klastra w kreatorze; potem diagnoza od nowa"; return 1; }
 fix_ROLE_MISSING()    { warn "$1: rolę generic::containerd przypisuje kreator - użyj --resume (usunięcie częściowego klastra + cm-kubernetes-setup -c)"; return 1; }
 fix_SOCKET_MISMATCH() { warn "$1: containerd działa, ale na innym sockecie niż oczekuje kreator - wyślij raport (raw/probe-$1.txt, raw/wizard-log.txt)"; return 1; }
@@ -571,6 +687,8 @@ if [ -r "$K8S_SETUP_LOG" ]; then
   info "Ostatni etap: $(grep -E '#### stage:' "$K8S_SETUP_LOG" | tail -1 | sed 's/^#* *//')"
   grep -n -iE 'error|fail|not ready|socket|traceback' "$K8S_SETUP_LOG" | tail -12 | cut -c1-260 | sed 's/^/      /' | tee -a "$LOG_FILE" >&2
   ws=$(wizard_sock); [ -n "$ws" ] && info "Socket, o którym mówi kreator: $ws"
+  info "Kreator testuje: 'crictl -r $WIZ_EP info' przez cmd na każdym węźle (z kodu: ${KUBE_PLUGIN:-nie znaleziono cm-setup})"
+  [ -n "${CTD_PROBE_DIR:-}" ] || { wiz_python && info "Test przez cmd: $WIZ_PY (pythoncm)" || warn "Nie znaleziono pythona z pythoncm - test kreatora tylko z powłoki z PATH procesu cmd"; }
 else
   info "Brak $K8S_SETUP_LOG"
 fi
@@ -593,7 +711,8 @@ for r in $(seq 1 "$ROUNDS"); do
     TRIED[$n]="${TRIED[$n]:-} ${VERDICT[$n]}"
     hdr "Naprawa $n: ${VERDICT[$n]}"
     if "fix_${VERDICT[$n]}" "$n"; then
-      restart_ctd "$n"; wait_ctd "$n"; fixed="$fixed $n"
+      [ "${VERDICT[$n]}" = WIZARD_CRICTL ] || { restart_ctd "$n"; wait_ctd "$n"; }
+      fixed="$fixed $n"
     else warn "$n: ${VERDICT[$n]} - brak automatycznej naprawy albo przerwano"; fi
   done
   [ -n "$fixed" ] || break
