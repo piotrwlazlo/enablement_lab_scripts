@@ -90,10 +90,36 @@ kv unit_owner "$(owner "$frag")"
 es=$(systemctl show containerd -p ExecStart --value 2>/dev/null)
 bin=$(sed -n 's/.*path=\([^ ;]*\).*/\1/p' <<<"$es" | head -1)
 argv=$(sed -n 's/.*argv\[\]=\([^;]*\).*/\1/p' <<<"$es" | head -1)
-cfg=$(sed -nE 's/.*(--config|[[:space:]]-c)[ =]([^ ]+).*/\2/p' <<<" $argv" | head -1)
 kv exec "$argv"
 [ -x "$B/current/bin/containerd" ] && kv bcm_bin yes || kv bcm_bin no
-[ -n "$bin" ] || { [ -x "$B/current/bin/containerd" ] && bin=$B/current/bin/containerd || bin=$(command -v containerd); }
+is_elf() { [ "$(head -c4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; }
+# ścieżki "/.../containerd" (bez shim/ctr) i pliki .toml w tekście
+ctd_paths() { grep -oE '(^|[ =:"'\''`(])/[^ ;"'\''`$(){}]*/containerd([ ;"'\''`)]|$)' | sed -E 's/^[ =:"'\''`(]//; s/[ ;"'\''`)]$//'; }
+toml_of()  { grep -oE -- '(--config|-c)[ =]+["'\'']?/[^ "'\'';]+\.toml' | head -1 | sed -E 's/^(--config|-c)[ =]+["'\'']?//'; }
+# BCM uruchamia containerd przez wrapper (np. /bin/bash -c '...' albo skrypt) - rozwiń do prawdziwej binarki
+src=execstart; wrap=; txt=$argv
+case ${bin##*/} in bash|sh|dash|zsh|env|ksh)
+  wrap=$bin; src=wrapper
+  for t in $(grep -oE '/[^ ;"'\''`$()]+' <<<"$argv"); do      # skrypt wywołany przez powłokę
+    [ "$t" = "$wrap" ] && continue
+    [ -f "$t" ] && [ "$(head -c2 "$t" 2>/dev/null)" = '#!' ] && { wrap="$wrap $t"; txt="$txt
+$(cat "$t" 2>/dev/null)"; }
+  done
+  bin=
+  for t in $(ctd_paths <<<"$txt"); do [ -x "$t" ] && { bin=$t; break; }; done;;
+esac
+if [ "$src" = execstart ] && [ -f "$bin" ] && ! is_elf "$bin"; then
+  # ExecStart to sam skrypt (nie ELF) - szukaj binarki w jego treści
+  [ -f "$bin" ] && { wrap=$bin; src=wrapper; txt="$txt
+$(cat "$bin" 2>/dev/null)"; bin=; for t in $(ctd_paths <<<"$txt"); do [ -x "$t" ] && { bin=$t; break; }; done; }
+fi
+if [ -z "$bin" ]; then                                       # z działającego procesu
+  for p in $(pgrep -x containerd 2>/dev/null); do bin=$(readlink -f "/proc/$p/exe"); [ -n "$bin" ] && { src=process; break; }; done
+fi
+[ -n "$bin" ] || { src=default; [ -x "$B/current/bin/containerd" ] && bin=$B/current/bin/containerd || bin=$(command -v containerd); }
+kv wrapper "$wrap"; kv bin_src "$src"
+cfg=$(toml_of <<<"$txt")
+[ -z "$cfg" ] && [ -n "$wrap" ] && grep -q "$B" <<<"$txt" && cfg=$B/var/etc/config.toml
 if [ -z "$cfg" ]; then
   case $bin in "$B"/*) cfg=$B/var/etc/config.toml;; *) cfg=/etc/containerd/config.toml;; esac
 fi
@@ -227,10 +253,12 @@ disk_full() {  # -> lista "ścieżka(mount): wolne/użycie/inody" dla zapełnion
 }
 verdict() {
   local n=$1 bin act sock lex foreign="" cri dis f full
+  local W; W=$(pv "$n" wrapper)
   bin=$(pv "$n" bin); act=$(pv "$n" u_ActiveState); sock=$(pv "$n" sock); lex=$(pv "$n" lst_exe)
   [ -n "$lex" ] && [[ $lex != "$BCM_CTD"/* ]] && foreign="socket $sock trzyma $lex (pid $(pv "$n" lst_pid))"
-  [ "$(pv "$n" bcm_bin)" = yes ] && [ -n "$bin" ] && [[ $bin != "$BCM_CTD"/* ]] \
-    && foreign="${foreign:+$foreign; }unit containerd ($(pv "$n" u_FragmentPath), pakiet $(pv "$n" unit_owner)) uruchamia $bin zamiast binarki BCM"
+  [ "$(pv "$n" bcm_bin)" = yes ] && [ -n "$bin" ] && [[ $bin != "$BCM_CTD"/* ]] && [ "$(pv "$n" bin_src)" != default ] \
+    && ! [[ ${bin##*/} =~ ^(bash|sh|dash|zsh|ksh|env)$ ]] \
+    && foreign="${foreign:+$foreign; }unit containerd ($(pv "$n" u_FragmentPath), pakiet $(pv "$n" unit_owner)) uruchamia $bin${W:+ (przez $W)} zamiast binarki BCM"
   dis=$(active_nocri "$n")
   for f in $dis; do [ "$f" = "$(pv "$n" cfg)" ] && [[ $f != "$BCM_CTD"/* ]] && foreign="${foreign:+$foreign; }aktywny config $f wyłącza plugin CRI (domyślny config containerd.io/Dockera)"; done
   full=$(disk_full "$n")
@@ -288,13 +316,13 @@ journal_hints() {
 }
 
 diagnose() {
-  local n=$1
+  local n=$1 W
   hdr "Diagnoza containerd: $n"
   if ! probe "$n"; then VERDICT[$n]=UNREACHABLE; WHY[$n]="sonda nie zadziałała: $(tail -2 "$(probe_file "$n")" | tr '\n' ' ')"; check FAIL "$n: sonda" "${WHY[$n]}"; return; fi
-  bcm_side "$n"
+  bcm_side "$n"; W=$(pv "$n" wrapper)
   info "$n: unit $(pv "$n" u_FragmentPath) (pakiet: $(pv "$n" unit_owner)), stan $(pv "$n" u_LoadState)/$(pv "$n" u_ActiveState)/$(pv "$n" u_SubState), restartów $(pv "$n" u_NRestarts)"
-  info "$n: ExecStart: $(pv "$n" exec)"
-  info "$n: binarka $(pv "$n" bin) [$(pv "$n" bin_ver)], config $(pv "$n" cfg), drop-iny: $(pv "$n" dropins)"
+  info "$n: ExecStart: $(pv "$n" exec)${W:+ -> wrapper: $W}"
+  info "$n: binarka $(pv "$n" bin) (źródło: $(pv "$n" bin_src)) [$(pv "$n" bin_ver)], config $(pv "$n" cfg), drop-iny: $(pv "$n" dropins)"
   info "$n: socket $(pv "$n" sock) - $(pv "$n" sock_exists), nasłuch: pid=$(pv "$n" lst_pid) $(pv "$n" lst_exe); procesy containerd: $(pv "$n" procs)"
   info "$n: ctr version rc=$(pv "$n" ctr_rc) serwer=$(pv "$n" srv_ver); CRI: $(pv "$n" cri); crictl rc=$(pv "$n" crictl_rc)"
   info "$n: pakiety:$(pv "$n" pkgs); $(pv "$n" docker_state)"
