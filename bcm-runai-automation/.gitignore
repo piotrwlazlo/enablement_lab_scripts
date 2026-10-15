@@ -1,0 +1,7 @@
+*.tar.gz
+bcm-collect-*/
+*.key
+*.pem
+ngc-api-key
+credential.jwt
+cm-*-setup.conf
