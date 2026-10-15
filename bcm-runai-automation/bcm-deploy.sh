@@ -448,7 +448,9 @@ phase_k8s() {
   fi
   chmod 600 "$conf"
   confirm "Wdrożyć K8s z $conf (cm-kubernetes-setup -c, workery zostaną zrestartowane)?" || die "Przerwano"
-  run "cm-kubernetes-setup -c $conf" cm-kubernetes-setup -c "$conf" || die "cm-kubernetes-setup zakończył się błędem (log: $LOG_FILE)"
+  run "cm-kubernetes-setup -c $conf" cm-kubernetes-setup -c "$conf" || {
+    grep -qi 'containerd' /var/log/cm-kubernetes-setup.log 2>/dev/null && info "Błąd dotyczy containerd? Diagnoza i naprawa: $SCRIPT_DIR/bcm-containerd-fix.sh [--fix] [--resume]"
+    die "cm-kubernetes-setup zakończył się błędem (log: $LOG_FILE)"; }
   k8s_clusters | grep -q . || die "Po instalacji nie widać klastra w cmsh kubernetes list"
   ok "Kubernetes wdrożony"
   done_phase k8s
