@@ -342,7 +342,7 @@ iface_for_net() {
 }
 
 # ------------------------------------------------------------- kubernetes ----
-k8s_clusters() { cmsh_q "kubernetes; list" | awk '!/^(Name|-)/ && NF && $1!~/Unable|Unknown|error/ {print $1}'; }
+k8s_clusters() { cmsh_q "kubernetes; list" | awk '!/^(Name|-)/ && NF && $1!~/Unable|Unknown|error|^cmsh:/ {print $1}'; }
 
 k8s_env() {
   local c=${1:-}

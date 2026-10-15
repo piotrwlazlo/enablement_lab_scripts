@@ -88,6 +88,16 @@ wizard_ep() {
 }
 WIZ_EP=$(wizard_ep); WIZ_EP=${WIZ_EP:-unix:///run/containerd/containerd.sock}
 
+# cmsh musi działać - bez niego nie widać węzłów ani stanu usług w cmd (np. brak libdcgm.so.4 po zmianie pakietów DCGM)
+CMSH_ERR=$(cmsh_q "device; list" | grep -E 'error while loading shared libraries|cannot open shared object|command not found|Unable to connect' | head -2)
+if [ -n "$CMSH_ERR" ]; then
+  check FAIL "cmsh nie działa" "$CMSH_ERR"
+  info "      brakujące biblioteki: $(ldd "$(command -v cmsh)" 2>/dev/null | awk '/not found/{print $1}' | xargs)"
+  info "      pakiety DCGM: $(dpkg-query -W -f='${Package}=${Version} ' 'datacenter-gpu-manager*' 'cuda-dcgm*' 2>/dev/null)"
+  info "      ostatnie usunięcia apt: $(grep -E '^(Start-Date|Remove|Purge):' /var/log/apt/history.log 2>/dev/null | grep -B1 -E '^(Remove|Purge):' | tail -4 | cut -c1-300 | tr '\n' ' ')"
+  warn "Bez cmsh sprawdzam tylko ten head node (węzły i stan usług w cmd są niewidoczne)"
+fi
+
 HEAD=$(hostname -s)
 is_local() { [ "$1" = "$HEAD" ] || [ "$1" = "$(hostname)" ]; }
 # Kreator czeka na containerd na WSZYSTKICH węzłach z rolą generic::containerd - bez --node
@@ -725,6 +735,7 @@ for n in $NODES; do
   printf '  %-20s %-16s %s\n' "$n" "${VERDICT[$n]}" "${WHY[$n]}" | tee -a "$LOG_FILE" >&2
   case ${VERDICT[$n]} in OK|ROLE_MISSING) ;; *) ready=0;; esac
 done
+[ -n "$CMSH_ERR" ] && { check FAIL "cmsh nie działa" "$CMSH_ERR - najpierw napraw cmsh (zob. początek raportu)"; ready=0; }
 info "Raport: $REPORT, surowe dane: $WORKDIR/raw/"
 if [ "$ready" = 0 ]; then
   opts=; for n in $NODES; do [ "$n" = "$HEAD" ] || opts="$opts --node $n"; done
